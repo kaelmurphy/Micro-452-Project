@@ -8,18 +8,18 @@ def toGray(frame):
 def detectEdges(frame, low=25, high=80, blur=3):
     # convert to grayscale
     g = toGray(frame)
-    # apply local contrast enhancement to make edges more visible
+    # apply contrast to make edges more visible
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     g = clahe.apply(g)
-    # optional median blur to clean up noise
+    # median blur to clean up noise
     if blur and blur > 0:
         k = blur | 1
         g = cv2.medianBlur(g, k)
-    # run canny edge detection
+    # canny edge detection
     return cv2.Canny(g, low, high)
 
 def overlayEdges(frame, edges):
-    # overlay detected edges in white on the original frame
+    # overlay detected edges in white on original frame
     out = frame.copy()
     out[edges > 0] = (255, 255, 255)
     return out
@@ -53,11 +53,11 @@ def detectAruco(frame, dictName="DICT_4X4_50", draw=True):
     # store detected ids
     idList = []
 
-    # if any markers were found
+    # if any markers found
     if ids is not None and len(ids) > 0:
         # flatten ids into list
         idList = ids.flatten().tolist()
-        # draw marker outlines (without text)
+        # draw marker outlines
         if draw:
             cv2.aruco.drawDetectedMarkers(annotated, corners)
         # loop through markers and add labels
@@ -90,7 +90,7 @@ def buildOperatingZone(centers):
     0 = top-left, 1 = top mid, 2 = top-right, 3 = right mid,
     4 = bottom-right, 5 = bottom mid, 6 = bottom-left, 7 = left mid
     """
-    # list of all required ids
+    # list of required ids
     required = [0,1,2,3,4,5,6,7]
     # list missing ids
     missing = [i for i in required if i not in centers]
@@ -135,7 +135,7 @@ def drawOperatingZone(frame, zone, color=(0, 255, 255)):
     # copy frame to draw overlays
     out = frame.copy()
 
-    # draw faint fill area
+    # draw fill area
     overlay = out.copy()
     cv2.fillPoly(overlay, [pts], color)
     cv2.addWeighted(overlay, 0.15, out, 0.85, 0, out)
