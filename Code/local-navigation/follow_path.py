@@ -1,70 +1,100 @@
+# Author    : Killian Baillifard
+# Date      : 12.11.2025
+# Brief     : Implementation of local navigation from a given path to follow
+
+# Imports
 from Thymio import Thymio
 import numpy as np
+import robot_convert as convert
+from robot_control import control_law
 import time
 
 # Connection settings
-PORT            = 'COM5'    # use tty on unix
-REFRESH_PERIOD  = 0.1       # seconds
+PORT    = 'COM3'    # use tty on unix
+DT      = 0.1       # seconds
 
-# Conversion constants
-MAX_PROX_VALUE  = 4300
-M_PER_S_PER_LSB = 0.020 / 500
-M_PER_S_2_PER_G = 9.81
-G_PER_LSB       = 1 / 23
+# Control routines
+def wait_connection(thymio: Thymio) -> None:
 
-# Conversion functions
+    # Wait until last key is created
+    TEST_SENSOR = 'sd.present'
+    while True:
+        try:
+            _ = thymio[TEST_SENSOR]
+            break
+        except KeyError:
+            pass
+        finally:
+            time.sleep(DT)
 
-def normalize_prox(raw: int) -> float:
-    return raw / MAX_PROX_VALUE
+    # Wait until last key is readable
+    while thymio[TEST_SENSOR] == []:
+        time.sleep(DT)
 
-def uint16_to_int16(value: int) -> int:
-    return value - 0x10000 if value & 0x8000 else value
+def follow_path(thymio: Thymio, path: np.ndarray):
 
-def convert_speed(raw: int) -> float:
-    return uint16_to_int16(raw) * M_PER_S_PER_LSB
+    # Control loop
+    position = np.array([0, 0])
+    while True:
 
-def convert_acc(raw: int) -> float:
-    return uint16_to_int16(raw) * G_PER_LSB * M_PER_S_2_PER_G
+        # Read and convert sensors values
+        PROX_H      = np.array([convert.to_norm_prox(value) for value in thymio['prox.horizontal']])
+        ACC         = np.array([convert.to_mps2(axis) for axis in thymio['acc']])
+        MOT_L_SPEED = convert.to_mps(thymio['motor.left.speed'])
+        MOT_R_SPEED = convert.to_mps(thymio['motor.right.speed'])
 
-# Control function
-def follow_path(path: np.ndarray):
+        # Update estimated position
+        meanSpeed = (MOT_L_SPEED + MOT_R_SPEED) / 2
+        position = np.array([
+            position[0] + DT * meanSpeed,
+            position[1]
+        ])
 
-    # Open connection with Thymio
-    with Thymio.serial(port=PORT, refreshing_rate=REFRESH_PERIOD) as thymio:
+        # Compute error, stop if error is less that 1 cm
+        error = path[0][0] - position[0]
+        if error < 0.01:
+            break
 
-        # Wait until first sensor measurment
-        time.sleep(REFRESH_PERIOD)
-        while thymio['prox.horizontal'] == []:
-            time.sleep(REFRESH_PERIOD)
+        # Compute and apply control input
+        speed = control_law(error)
+        thymio['motor.left.target'] = convert.to_int_speed(speed)
+        thymio['motor.right.target'] = convert.to_int_speed(speed)
 
-        # Control loop
-        i = 20
-        position = (0, 0)
-        while i:
+        # Pace loop
+        time.sleep(DT)
 
-            # Read and convert sensors values
-            PROX_H      = np.array([normalize_prox(value) for value in thymio['prox.horizontal']])
-            ACC         = np.array([convert_acc(axis) for axis in thymio['acc']])
-            MOT_L_SPEED = convert_speed(thymio['motor.left.speed'])
-            MOT_R_SPEED = convert_speed(thymio['motor.right.speed'])
+def stop(thymio: Thymio):
 
-            # Print sensors
-            print(PROX_H)
-            print(ACC)
-            print(MOT_L_SPEED)
-            print(MOT_R_SPEED)
+    # Give stop command
+    thymio['motor.left.target'] = 0
+    thymio['motor.right.target'] = 0
 
-            # Pace loop
-            time.sleep(REFRESH_PERIOD)
-            i -= 1
+    # Wait until speed fall under threshold
+    SPEED_THRESHOLD = 0.001
+    while True:
+        time.sleep(DT)
+        MOT_L_SPEED = convert.to_mps(thymio['motor.left.speed'])
+        MOT_R_SPEED = convert.to_mps(thymio['motor.right.speed'])
+        if MOT_L_SPEED < SPEED_THRESHOLD and MOT_R_SPEED < SPEED_THRESHOLD:
+            return
 
-# Demo program
 if __name__ == '__main__':
 
     # Path coordinates list (in meters)
     PATH = np.array([
-        [0.2, 0.0]
+        [0.1, 0.0]
     ])
 
-    # Run control routine
-    follow_path(PATH)
+    with Thymio.serial(port=PORT, refreshing_rate=DT) as thymio:
+        print('Starting path following, press CTRL + C to cancel')
+        try:
+            print('Connecting to Thymio ... ', end='')
+            wait_connection(thymio)
+            print('Connected')
+            print('Start following path')
+            follow_path(thymio, PATH)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print('Cutting off motors')
+            stop(thymio)
