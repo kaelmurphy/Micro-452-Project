@@ -1,5 +1,8 @@
 import cv2
 import numpy as np
+from aruco_utils import detectAruco, buildOperatingZone
+from draw_utils import drawOperatingZone, drawRobotGoal
+from coord_utils import worldToZone, robotWorldPose, _smooth_tuple, _smooth_angle, _as_xy
 
 def toGray(frame):
     # convert frame to grayscale
@@ -18,135 +21,236 @@ def detectEdges(frame, low=25, high=80, blur=3):
     # canny edge detection
     return cv2.Canny(g, low, high)
 
-def overlayEdges(frame, edges):
-    # overlay detected edges in white on original frame
-    out = frame.copy()
-    out[edges > 0] = (255, 255, 255)
-    return out
-
-def detectAruco(frame, dictName="DICT_4X4_50", draw=True):
+def createCanvasAndState(frame, robotId=8, goalId=9,
+                         edgeParams=dict(low=25, high=80, blur=3)):
     """
-    returns (ids:list[int], centers:dict[id]=(x,y), annotatedFrame)
-    finds aruco markers and labels them once in sky blue
+    produces white canvas with black edges and colored overlays,
+    returns a state dict for path planning.
+
+    returns: (canvas_bgr, state)
+    state contains keys: zone, zoneWorld, goalWorld, goalZone, robotWorld,
+    robotZone, robotThetaWorld, robotThetaZone, ids
     """
-    # skip if aruco module missing
-    if not hasattr(cv2, "aruco"):
-        return [], {}, frame
+    # detect edges
+    edges = detectEdges(frame, **edgeParams)
 
-    # get dictionary type, fallback to 4x4_50
-    if not hasattr(cv2.aruco, dictName):
-        dictName = "DICT_4X4_50"
-    dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, dictName))
+    # smoothing key for this camera/robot/goal combination
+    _smoothKey = f"r{robotId}_g{goalId}"
 
-    # setup detector
-    params = cv2.aruco.DetectorParameters()
-    detector = cv2.aruco.ArucoDetector(dictionary, params)
+    # create white canvas and draw black edges
+    canvas = np.full_like(frame, 255)
+    canvas[edges > 0] = (0, 0, 0)
 
-    # detect markers on grayscale frame
-    gray = toGray(frame)
-    corners, ids, _ = detector.detectMarkers(gray)
+    # detect aruco markers
+    ids, centers, cornersMap, _ = detectAruco(frame, dictName="DICT_4X4_50", draw=False)
 
-    # copy frame to draw on
-    annotated = frame.copy()
-    # store marker centers
-    centers = {}
-    # store detected ids
-    idList = []
+    # build operating zone and draw
+    zone = buildOperatingZone(centers)
+    canvas = drawOperatingZone(canvas, zone, color=(0, 255, 255))
 
-    # if any markers found
-    if ids is not None and len(ids) > 0:
-        # flatten ids into list
-        idList = ids.flatten().tolist()
-        # draw marker outlines
-        if draw:
-            cv2.aruco.drawDetectedMarkers(annotated, corners)
-        # loop through markers and add labels
-        for i, cid in enumerate(idList):
-            # get four corner points
-            pts = corners[i][0]
-            # calculate marker center
-            cx, cy = int(pts[:, 0].mean()), int(pts[:, 1].mean())
-            centers[cid] = (cx, cy)
-            # draw center dot
-            cv2.circle(annotated, (cx, cy), 6, (255, 200, 0), -1)
-            # write id label
-            cv2.putText(
-                annotated,
-                f"id: {cid}",
-                (cx + 10, cy - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (255, 200, 0),
-                2,
-                cv2.LINE_AA
-            )
+    # draw robot and goal overlays (prefer cornersMap so outlines match)
+    drawSource = cornersMap if cornersMap else centers
+    canvas = drawRobotGoal(canvas, drawSource, robotId=robotId, goalIds=[goalId])
 
-    return idList, centers, annotated
+    # compute zone_world (corners and centroid)
+    # map pixel coordinates into a consistent world coordinate system where
+    # image top-left -> (0,0) and image bottom-right -> (10000,10000).
+    frame_h, frame_w = frame.shape[:2]
+    if frame_w <= 1 or frame_h <= 1:
+        sx = sy = 1.0
+    else:
+        sx = 10000.0 / float(frame_w - 1)
+        sy = 10000.0 / float(frame_h - 1)
 
-def buildOperatingZone(centers):
-    """
-    centers: dict[id] = (x,y) from detectAruco
-    returns dict defining operating rectangle using markers 0 through 7
-    0 = top-left, 1 = top mid, 2 = top-right, 3 = right mid,
-    4 = bottom-right, 5 = bottom mid, 6 = bottom-left, 7 = left mid
-    """
-    # list of required ids
-    required = [0,1,2,3,4,5,6,7]
-    # list missing ids
-    missing = [i for i in required if i not in centers]
+    def pixelToWorld(pt):
+        """
+        convert an (x,y) pixel tuple to world coords (xw, yw) in [0,10000].
+        """
+        x, y = float(pt[0]), float(pt[1])
+        return (x * sx, y * sy)
 
-    # define output dictionary
-    zone = {
-        'isComplete': len(missing) == 0,
-        'missing': missing,
-        'corners': [],
-        'edgeMids': {}
+    zoneWorld = None
+    if zone and zone.get('corners'):
+        # convert each corner to world coords
+        worldCorners = [pixelToWorld(c) for c in zone['corners']]
+        wc = np.array(worldCorners, dtype=float)
+        zCx = float(wc[:, 0].mean())
+        zCy = float(wc[:, 1].mean())
+        zoneWorld = {
+            'corners': worldCorners,
+            'center': (zCx, zCy)
+        }
+
+    # goal world and in-zone coords
+    goalWorld = None
+    goalZone = None
+    if goalId in centers:
+        # map goal pixel center to world coords
+        goalWorld = pixelToWorld(centers[goalId])
+        if zoneWorld:
+            # worldToZone expects zone corners in the same coord space as the point
+            gz = worldToZone(goalWorld, {'corners': zoneWorld['corners']})
+            # scale to 0..10000 where tl->(0,0) and br->(10000,10000)
+            if gz is not None:
+                goalZone = (float(gz[0]) * 10000.0, float(gz[1]) * 10000.0)
+            else:
+                goalZone = None
+
+    # apply smoothing to goal/world coords (store smoothed copies)
+    goalWorldSmoothed = _smooth_tuple(_smoothKey, 'goalWorld', goalWorld)
+    goalZoneSmoothed = _smooth_tuple(_smoothKey, 'goalZone', goalZone)
+
+    # robot world and orientation
+    robotWorld = None
+    robotZone = None
+    robotThetaWorld = None
+    robotThetaZone = None
+    rCx, rCy, rTheta = robotWorldPose(centers, cornersMap=cornersMap, robotId=robotId)
+    if rCx is not None:
+        # map robot center to world coords
+        robotWorld = pixelToWorld((rCx, rCy))
+
+        # compute theta in world coordinates: if corners available, use top-middle
+        if cornersMap and robotId in cornersMap:
+            arr = np.asarray(cornersMap[robotId], dtype=float)
+            topMidPx = np.array([(arr[0,0] + arr[1,0]) / 2.0, (arr[0,1] + arr[1,1]) / 2.0])
+            topMidWorld = pixelToWorld((topMidPx[0], topMidPx[1]))
+            cxw, cyw = robotWorld
+            vecWorld = np.array([topMidWorld[0] - cxw, topMidWorld[1] - cyw], dtype=float)
+            robotThetaWorld = float(np.arctan2(vecWorld[1], vecWorld[0]))
+        else:
+            # fallback: if only rTheta (pixel-space) available, convert using scale factors
+            if rTheta is not None:
+                ux = np.cos(rTheta) * sx
+                uy = np.sin(rTheta) * sy
+                robotThetaWorld = float(np.arctan2(uy, ux))
+            else:
+                robotThetaWorld = None
+
+        # compute robot zone-local coords using world coords
+        if zoneWorld:
+            rz = worldToZone(robotWorld, {'corners': zoneWorld['corners']})
+            if rz is not None:
+                robotZone = (float(rz[0]) * 10000.0, float(rz[1]) * 10000.0)
+            else:
+                robotZone = None
+            # compute orientation relative to the bottom edge of the zone
+            if robotThetaWorld is not None:
+                try:
+                    # zoneWorld corners are [tl, tr, br, bl]
+                    tl_w, tr_w, br_w, bl_w = zoneWorld['corners']
+                    tl_w = np.array(tl_w, dtype=float)
+                    tr_w = np.array(tr_w, dtype=float)
+                    br_w = np.array(br_w, dtype=float)
+                    bl_w = np.array(bl_w, dtype=float)
+                    # bottom edge vector from left-bottom (bl) -> right-bottom (br)
+                    edgeVec = br_w - bl_w
+                    edgeAngle = float(np.arctan2(edgeVec[1], edgeVec[0]))
+                    # relative angle = robot heading - edge angle, normalized to [-pi, pi]
+                    rel = robotThetaWorld - edgeAngle
+                    # normalize
+                    rel = (rel + np.pi) % (2 * np.pi) - np.pi
+                    robotThetaZone = float(rel)
+                except Exception:
+                    robotThetaZone = None
+
+    # apply smoothing to robot/world coords and angle
+    robotWorldSmoothed = _smooth_tuple(_smoothKey, 'robotWorld', robotWorld)
+    robotZoneSmoothed = _smooth_tuple(_smoothKey, 'robotZone', robotZone)
+    robotThetaZoneSmoothed = _smooth_angle(_smoothKey, 'robotThetaZone', robotThetaZone)
+
+    state = {
+        'zone': zone,
+        'zoneWorld': zoneWorld,
+        'goalWorld': goalWorld,
+        'goalZone': goalZone,
+        'goalWorldSmoothed': goalWorldSmoothed,
+        'goalZoneSmoothed': goalZoneSmoothed,
+        'robotWorld': robotWorld,
+        'robotZone': robotZone,
+        'robotWorldSmoothed': robotWorldSmoothed,
+        'robotZoneSmoothed': robotZoneSmoothed,
+        'robotThetaWorld': robotThetaWorld,
+        'robotThetaZone': robotThetaZone,
+        'robotThetaZoneSmoothed': robotThetaZoneSmoothed,
+        'ids': ids,
+        'centers': centers,
+        'cornersMap': cornersMap
     }
 
-    # add corners if all present
-    cornerIds = [0, 2, 4, 6]
-    if all(cid in centers for cid in cornerIds):
-        tl = centers[0]
-        tr = centers[2]
-        br = centers[4]
-        bl = centers[6]
-        zone['corners'] = [tl, tr, br, bl]
+    # draw status text in bottom-left corner: show goal x,y and robot x,y,theta
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    fontScale = 0.7
+    thickness = 2
+    lineHeight = int(20 * fontScale) + 6
+    pad = 8
+    canvas_h = canvas.shape[0]
+    # start baseline near bottom-left and draw lines upwards
+    lines = []
+    # prefer smoothed zone-local coords for display (safe unpacking)
+    gzs = _as_xy(state.get('goalZoneSmoothed'))
+    gw = _as_xy(state.get('goalWorldSmoothed'))
+    gz_raw = _as_xy(state.get('goalZone'))
+    gw_raw = _as_xy(state.get('goalWorld'))
+    if gzs is not None:
+        gx, gy = gzs
+        lines.append(f"Goal: x={int(round(gx))} y={int(round(gy))}")
+    elif gz_raw is not None:
+        gx, gy = gz_raw
+        lines.append(f"Goal: x={int(round(gx))} y={int(round(gy))}")
+    elif gw is not None:
+        gx, gy = gw
+        lines.append(f"Goal(world): x={int(round(gx))} y={int(round(gy))}")
+    elif gw_raw is not None:
+        gx, gy = gw_raw
+        lines.append(f"Goal(world): x={int(round(gx))} y={int(round(gy))}")
+    else:
+        lines.append("Goal: n/a")
 
-    # add midpoints for edges if available
-    for mid in [1,3,5,7]:
-        if mid in centers:
-            zone['edgeMids'][mid] = centers[mid]
+    # prefer smoothed zone-local coords and smoothed theta for display (safe)
+    rzs = _as_xy(state.get('robotZoneSmoothed'))
+    rws = _as_xy(state.get('robotWorldSmoothed'))
+    rtheta_s = state.get('robotThetaZoneSmoothed')
+    rz_raw = _as_xy(state.get('robotZone'))
+    rw_raw = _as_xy(state.get('robotWorld'))
+    if rzs is not None:
+        rx, ry = rzs
+        if rtheta_s is not None:
+            deg = rtheta_s * 180.0 / np.pi
+            lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta={deg:.1f}deg")
+        else:
+            lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta=n/a")
+    elif rz_raw is not None:
+        rx, ry = rz_raw
+        rtheta = state.get('robotThetaZone')
+        if rtheta is not None:
+            deg = rtheta * 180.0 / np.pi
+            lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta={deg:.1f}deg")
+        else:
+            lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta=n/a")
+    elif rws is not None:
+        rx, ry = rws
+        rthetaw = state.get('robotThetaWorld')
+        if rthetaw is not None:
+            deg = rthetaw * 180.0 / np.pi
+            lines.append(f"Robot(world): x={int(round(rx))} y={int(round(ry))} theta={deg:.1f}deg")
+        else:
+            lines.append(f"Robot(world): x={int(round(rx))} y={int(round(ry))} theta=n/a")
+    elif rw_raw is not None:
+        rx, ry = rw_raw
+        rthetaw = state.get('robotThetaWorld')
+        if rthetaw is not None:
+            deg = rthetaw * 180.0 / np.pi
+            lines.append(f"Robot(world): x={int(round(rx))} y={int(round(ry))} theta={deg:.1f}deg")
+        else:
+            lines.append(f"Robot(world): x={int(round(rx))} y={int(round(ry))} theta=n/a")
+    else:
+        lines.append("Robot: n/a")
 
-    return zone
+    # draw each line from bottom up
+    for i, txt in enumerate(reversed(lines)):
+        y = canvas_h - pad - (i * lineHeight)
+        cv2.putText(canvas, txt, (pad, y), font, fontScale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+        cv2.putText(canvas, txt, (pad, y), font, fontScale, (255, 255, 255), thickness, cv2.LINE_AA)
 
-def drawOperatingZone(frame, zone, color=(0, 255, 255)):
-    """
-    draws the operating rectangle and optional mid-edge markers, uses corners 0,2,4,6 to form a polygon,
-    adds a fill to visualize boundaries
-    """
-    # check if enough corner points exist
-    if not zone['corners']:
-        return frame
-
-    # extract points in correct order
-    tl, tr, br, bl = zone['corners']
-    pts = np.array([tl, tr, br, bl], dtype=np.int32)
-
-    # copy frame to draw overlays
-    out = frame.copy()
-
-    # draw fill area
-    overlay = out.copy()
-    cv2.fillPoly(overlay, [pts], color)
-    cv2.addWeighted(overlay, 0.15, out, 0.85, 0, out)
-
-    # draw thick border
-    cv2.polylines(out, [pts], isClosed=True, color=color, thickness=3, lineType=cv2.LINE_AA)
-
-    # draw edge midpoint dots if they exist
-    for midId in [1,3,5,7]:
-        if midId in zone['edgeMids']:
-            x, y = zone['edgeMids'][midId]
-            cv2.circle(out, (int(x), int(y)), 6, color, -1, cv2.LINE_AA)
-    
-    return out
+    return canvas, state
