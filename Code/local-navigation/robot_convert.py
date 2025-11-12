@@ -29,16 +29,16 @@ def to_mps2(raw: int) -> float:
     """
     Convert raw acceleration integer into a float in meters per seconds squared
     """
-    return to_int16(raw) * constants.G_PER_LSB * constants.MPS_2_PER_G
+    return to_int16(raw) * constants.G_PER_LSB * constants.METERS_PER_SECONDS_SQUARED_PER_G
 
 def to_mps(raw: int) -> float:
     """
     Convert raw speed integer into a float in meters per seconds
     """
-    return to_int16(raw) * constants.MPS_PER_LSB
+    return to_int16(raw) * constants.METERS_PER_SECONDS_PER_LSB
 
 def to_int_speed(speed: float) -> int:
     """
-    Convert a speed in meters per seconds into an integer value for the robot
+    Convert a speed in meters per seconds into an integer value for robot target speed
     """
-    return to_uint16(int(speed / constants.MPS_PER_LSB))
+    return to_uint16(int(speed / constants.METERS_PER_SECONDS_PER_LSB))
