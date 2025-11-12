@@ -45,8 +45,8 @@ def stop(thymio: Thymio) -> None:
     SPEED_TOLERANCE = 0.001
     while True:
         time.sleep(DT)
-        MOT_L_SPEED = convert.to_mps(thymio['motor.left.speed'])
-        MOT_R_SPEED = convert.to_mps(thymio['motor.right.speed'])
+        MOT_L_SPEED = convert.to_meters_per_seconds(thymio['motor.left.speed'])
+        MOT_R_SPEED = convert.to_meters_per_seconds(thymio['motor.right.speed'])
         if MOT_L_SPEED < SPEED_TOLERANCE and MOT_R_SPEED < SPEED_TOLERANCE:
             return
 
@@ -58,10 +58,10 @@ def move_distance(thymio: Thymio, distance: float) -> None:
     while True:
 
         # Read and convert sensors values
-        PROX_H      = np.array([convert.to_norm_prox(value) for value in thymio['prox.horizontal']])
-        ACC         = np.array([convert.to_mps2(axis) for axis in thymio['acc']])
-        MOT_L_SPEED = convert.to_mps(thymio['motor.left.speed'])
-        MOT_R_SPEED = convert.to_mps(thymio['motor.right.speed'])
+        PROX_H      = np.array([convert.to_normalized_proximity(value) for value in thymio['prox.horizontal']])
+        ACC         = np.array([convert.to_meters_per_seconds_squared(axis) for axis in thymio['acc']])
+        MOT_L_SPEED = convert.to_meters_per_seconds(thymio['motor.left.speed'])
+        MOT_R_SPEED = convert.to_meters_per_seconds(thymio['motor.right.speed'])
 
         # Update estimated position and error
         meanSpeed = (MOT_L_SPEED + MOT_R_SPEED) / 2
@@ -71,8 +71,8 @@ def move_distance(thymio: Thymio, distance: float) -> None:
         # Compute and apply control input
         if error > ERROR_TOLERANCE:
             speed = constants.MAX_SPEED_METERS_PER_SECOND
-            thymio['motor.left.target'] = convert.to_int_speed(speed)
-            thymio['motor.right.target'] = convert.to_int_speed(speed)
+            thymio['motor.left.target'] = convert.to_thymio_speed(speed)
+            thymio['motor.right.target'] = convert.to_thymio_speed(speed)
 
         # Stop robot if within error tolerance
         else:
@@ -91,10 +91,10 @@ def turn_angle(thymio: Thymio, radians: float) -> None:
     while True:
 
         # Read and convert sensors values
-        PROX_H      = np.array([convert.to_norm_prox(value) for value in thymio['prox.horizontal']])
-        ACC         = np.array([convert.to_mps2(axis) for axis in thymio['acc']])
-        MOT_L_SPEED = convert.to_mps(thymio['motor.left.speed'])
-        MOT_R_SPEED = convert.to_mps(thymio['motor.right.speed'])
+        PROX_H      = np.array([convert.to_normalized_proximity(value) for value in thymio['prox.horizontal']])
+        ACC         = np.array([convert.to_meters_per_seconds_squared(axis) for axis in thymio['acc']])
+        MOT_L_SPEED = convert.to_meters_per_seconds(thymio['motor.left.speed'])
+        MOT_R_SPEED = convert.to_meters_per_seconds(thymio['motor.right.speed'])
 
         # Update estimated position and error
         meanSpeed = (np.abs(MOT_L_SPEED) + np.abs(MOT_R_SPEED)) / 2
@@ -104,8 +104,8 @@ def turn_angle(thymio: Thymio, radians: float) -> None:
         # Compute and apply control input
         if error > ERROR_TOLERANCE:
             speed = constants.MAX_SPEED_METERS_PER_SECOND
-            thymio['motor.left.target'] = convert.to_int_speed(-speed * np.sign(radians)) 
-            thymio['motor.right.target'] = convert.to_int_speed(speed * np.sign(radians))
+            thymio['motor.left.target'] = convert.to_thymio_speed(-speed * np.sign(radians)) 
+            thymio['motor.right.target'] = convert.to_thymio_speed(speed * np.sign(radians))
 
         # Stop robot if within error tolerance
         else:
