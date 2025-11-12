@@ -1,0 +1,32 @@
+# Variables
+var error = 0
+var position = 0
+var done = 0
+
+# Update loop
+timer.period[0] = {DT} # Milliseconds
+onevent timer0
+
+	# Early return if move routine is done
+	if done == 1 then
+		return
+	end
+
+	# Compute position error
+	position += (abs motor.left.speed + abs motor.right.speed) / {INV_INTEGR_CONST}
+  	error = {DISTANCE} - position
+  	
+  	# Apply target speed
+	if error > 5 then
+		motor.left.target = {LEFT_SPEED}
+		motor.right.target = {RIGHT_SPEED}
+		leds.top = [0, 32, 0]
+
+	# Stop program when within 1 cm of target
+	else
+		motor.left.target = 0
+		motor.right.target = 0
+		leds.top = [0, 0, 32]
+		done = 1
+		emit done
+	end
