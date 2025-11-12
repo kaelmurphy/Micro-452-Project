@@ -7,6 +7,7 @@ from Thymio import Thymio
 import numpy as np
 import robot_convert as convert
 import robot_constants as constants
+from remote_code_execution import move, turn
 import time
 
 # Connection settings
@@ -115,7 +116,7 @@ def turn_angle(thymio: Thymio, radians: float) -> None:
         # Pace loop
         time.sleep(DT)
 
-def follow_path(thymio: Thymio, path: np.ndarray):
+def follow_path(path: np.ndarray):
 
     # Compute number of steps needed to complete path
     STEPS = path.shape[0] - 1
@@ -126,18 +127,18 @@ def follow_path(thymio: Thymio, path: np.ndarray):
 
         # Compute next movement
         movementVector = path[step + 1] - path[step]
-        movementAmplitude = np.linalg.norm(movementVector)
+        movementAmplitude = int(np.linalg.norm(movementVector))
         movementAbsoluteDirection = np.angle(complex(movementVector[0], movementVector[1]))
         movementRelativeDirection = wrap(movementAbsoluteDirection - currentDirection)
 
         # Turn toward next position
         print(f'Turning {movementRelativeDirection:.3f} radians')
-        turn_angle(thymio, movementRelativeDirection)
+        turn(movementRelativeDirection)
         currentDirection = wrap(currentDirection + movementRelativeDirection)
 
         # Move to position
-        print(f'Moving {movementAmplitude:.3f} meters')
-        move_distance(thymio, movementAmplitude)
+        print(f'Moving {movementAmplitude:.3f} mm')
+        move(movementAmplitude)
 
         # Proceed to next waypoint
         step += 1
@@ -146,13 +147,16 @@ if __name__ == '__main__':
 
     # Path coordinates list (in meters)
     PATH = np.array([
-        [0.0, 0.0],
-        [0.1, 0.0],
-        [0.1, -0.1],
-        [0.2, -0.1],
-        [0.3, 0.0]
+        [0, 0],
+        [100, 0],
+        [100, -100],
+        [200, -100],
+        [300, 0]
     ])
 
+    follow_path(PATH)
+
+"""
     with Thymio.serial(port=PORT, refreshing_rate=DT) as thymio:
         print('Starting path following, press CTRL + C to cancel')
         try:
@@ -164,4 +168,4 @@ if __name__ == '__main__':
             pass
         finally:
             print('Ending program')
-            stop(thymio)
+            stop(thymio)"""

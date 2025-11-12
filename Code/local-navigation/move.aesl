@@ -13,11 +13,11 @@ onevent timer0
 	end
 
 	# Compute position error
-	position = position + (motor.left.speed + motor.right.speed) / {INV_INTEGR_CONST}
+	position += (abs motor.left.speed + abs motor.right.speed) / {INV_INTEGR_CONST}
   	error = {DISTANCE} - position
   	
   	# Apply target speed
-	if error > 10 then
+	if error > 5 then
 		motor.left.target = {LEFT_SPEED}
 		motor.right.target = {RIGHT_SPEED}
 		leds.top = [0, 32, 0]
