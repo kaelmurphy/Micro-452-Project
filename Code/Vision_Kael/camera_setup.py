@@ -4,13 +4,12 @@ import threading
 import cv2
 
 def getBackend():
-    # select the correct backend depending on OS
-    # use DirectShow on Windows, default otherwise
+    # return opencv video backend
     return cv2.CAP_DSHOW if sys.platform.startswith("win") else None
 
 class CameraStream:
-    # class that handles threaded camera capture
-    def __init__(self, index=1, backend=None, width=1920, height=1080, fps=30):
+    # class that handles camera capture
+    def __init__(self, index, backend=None, width=1920, height=1080, fps=30):
         # store camera parameters
         self.index = index
         self.backend = getBackend() if backend is None else backend
