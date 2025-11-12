@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 
-
 def drawOperatingZone(frame, zone, color=(0, 255, 255)):
     """
     draws operating rectangle optional mid-edge markers, uses corners 0,2,4,6 to form polygon,

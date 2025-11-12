@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 
-
 def detectAruco(frame, dictName="DICT_4X4_50", draw=True):
     """
     returns (ids:list[int], centers:dict[id]=(x,y), cornersMap, annotatedFrame)
