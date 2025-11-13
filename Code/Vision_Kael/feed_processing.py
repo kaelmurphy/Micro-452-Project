@@ -8,7 +8,7 @@ def toGray(frame):
     # convert frame to grayscale
     return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-def detectEdges(frame, low=25, high=80, blur=3):
+def detectEdges(frame, low=30, high=100, blur=3):
     # convert to grayscale
     g = toGray(frame)
     # apply contrast to make edges more visible
@@ -53,7 +53,7 @@ def createCanvasAndState(frame, robotId=8, goalId=9,
     canvas = drawRobotGoal(canvas, drawSource, robotId=robotId, goalIds=[goalId])
 
     # compute zone_world (corners and centroid)
-    # map pixel coordinates into a consistent world coordinate system where
+    # map pixel coordinates into a world coordinate system where
     # image top-left -> (0,0) and image bottom-right -> (10000,10000).
     frame_h, frame_w = frame.shape[:2]
     if frame_w <= 1 or frame_h <= 1:
@@ -90,7 +90,7 @@ def createCanvasAndState(frame, robotId=8, goalId=9,
         if zoneWorld:
             # worldToZone expects zone corners in the same coord space as the point
             gz = worldToZone(goalWorld, {'corners': zoneWorld['corners']})
-            # scale to 0..10000 where tl->(0,0) and br->(10000,10000)
+            # scale to 0-10000 where tl->(0,0) and br->(10000,10000)
             if gz is not None:
                 goalZone = (float(gz[0]) * 10000.0, float(gz[1]) * 10000.0)
             else:
@@ -187,32 +187,22 @@ def createCanvasAndState(frame, robotId=8, goalId=9,
     canvas_h = canvas.shape[0]
     # start baseline near bottom-left and draw lines upwards
     lines = []
-    # prefer smoothed zone-local coords for display (safe unpacking)
+    # goal coords
     gzs = _as_xy(state.get('goalZoneSmoothed'))
     gw = _as_xy(state.get('goalWorldSmoothed'))
-    gz_raw = _as_xy(state.get('goalZone'))
-    gw_raw = _as_xy(state.get('goalWorld'))
     if gzs is not None:
         gx, gy = gzs
-        lines.append(f"Goal: x={int(round(gx))} y={int(round(gy))}")
-    elif gz_raw is not None:
-        gx, gy = gz_raw
         lines.append(f"Goal: x={int(round(gx))} y={int(round(gy))}")
     elif gw is not None:
         gx, gy = gw
         lines.append(f"Goal(world): x={int(round(gx))} y={int(round(gy))}")
-    elif gw_raw is not None:
-        gx, gy = gw_raw
-        lines.append(f"Goal(world): x={int(round(gx))} y={int(round(gy))}")
     else:
         lines.append("Goal: n/a")
 
-    # prefer smoothed zone-local coords and smoothed theta for display (safe)
+    # robot coords and angle
     rzs = _as_xy(state.get('robotZoneSmoothed'))
     rws = _as_xy(state.get('robotWorldSmoothed'))
     rtheta_s = state.get('robotThetaZoneSmoothed')
-    rz_raw = _as_xy(state.get('robotZone'))
-    rw_raw = _as_xy(state.get('robotWorld'))
     if rzs is not None:
         rx, ry = rzs
         if rtheta_s is not None:
@@ -220,24 +210,8 @@ def createCanvasAndState(frame, robotId=8, goalId=9,
             lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta={deg:.1f}deg")
         else:
             lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta=n/a")
-    elif rz_raw is not None:
-        rx, ry = rz_raw
-        rtheta = state.get('robotThetaZone')
-        if rtheta is not None:
-            deg = rtheta * 180.0 / np.pi
-            lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta={deg:.1f}deg")
-        else:
-            lines.append(f"Robot: x={int(round(rx))} y={int(round(ry))} theta=n/a")
     elif rws is not None:
         rx, ry = rws
-        rthetaw = state.get('robotThetaWorld')
-        if rthetaw is not None:
-            deg = rthetaw * 180.0 / np.pi
-            lines.append(f"Robot(world): x={int(round(rx))} y={int(round(ry))} theta={deg:.1f}deg")
-        else:
-            lines.append(f"Robot(world): x={int(round(rx))} y={int(round(ry))} theta=n/a")
-    elif rw_raw is not None:
-        rx, ry = rw_raw
         rthetaw = state.get('robotThetaWorld')
         if rthetaw is not None:
             deg = rthetaw * 180.0 / np.pi

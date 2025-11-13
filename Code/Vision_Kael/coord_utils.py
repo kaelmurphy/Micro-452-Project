@@ -75,7 +75,7 @@ def worldToZone(point, zone):
     ex = tr - tl
     ey = bl - tl
 
-    # build 2x2 matrix [ex ey]
+    # build 2x2 [ex ey]
     M = np.column_stack((ex, ey))
     try:
         coeffs = np.linalg.solve(M, (p - tl))
