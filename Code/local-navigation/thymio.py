@@ -4,20 +4,19 @@
 
 # Imports
 from tdmclient import ClientAsync
-import numpy as np
+from tdmclient.clientasyncnode import ClientAsyncNode
 
 # Thymio class
 class Thymio():
 
     # Thymio settings
-    MAX_SPEED                       = 200 # Millimeter
-    MAX_SPEED_LSB                   = 500 # LSB
-    WHEEL_PITCH                     = 100 # Millimeters
-    DONE_POLLING_PERIOD             = 0.1 # Seconds
-    MILLIMETERS_PER_SECOND_PER_LSB  = MAX_SPEED / MAX_SPEED_LSB
+    WHEEL_PITCH         = 91.67329  # Millimeters
+    DONE_POLLING_PERIOD = 0.1   # Seconds
 
     def __init__(self) -> None:
         self.done = False
+        self.programPath = None
+        self.programSource = None
         self.client = ClientAsync()
 
     def __enter__(self) -> 'Thymio':
@@ -34,6 +33,7 @@ class Thymio():
 
     async def execute(self):
 
+        node: ClientAsyncNode
         with await self.client.lock() as node:
 
             # Register events
@@ -45,9 +45,9 @@ class Thymio():
                 raise RuntimeError(f'Event registration error: {error}')
             
             # Compile program
-            error = await node.compile(self.program)
+            error = await node.compile(self.programSource)
             if error is not None:
-                raise RuntimeError(f'Compilation error: {error['error_msg']}')
+                raise RuntimeError(f'Compilation error: {self.programPath} at line {error['error_line']}:{error['error_col']} {error['error_msg']}')
             
             # Start program
             await node.watch(events=True)
@@ -62,48 +62,11 @@ class Thymio():
     def run_program(self, path: str, **kwargs) -> None:
 
         # Load program
+        self.programPath = path
         with open(path) as file:
             source = file.read()
-            self.program = source.format(**kwargs)
+            self.programPath = path
+            self.programSource = source.format(**kwargs)
         
         # Run program
         self.client.run_async_program(self.execute)
-
-    def move(self, millimeters: int) -> None:
-
-        # Movement settings
-        DELTA_T = 25                    # Milliseconds
-        SPEED   = Thymio.MAX_SPEED      # Millimeters per seconds
-        SUMMED_SPEEDS = 2               # Both motors speed summed up in aseba code
-        MILLISECONDS_PER_SECONDS = 1000 # Obvious only if written down
-        INTEGRATION_CONSTANT = Thymio.MILLIMETERS_PER_SECOND_PER_LSB * (DELTA_T / MILLISECONDS_PER_SECONDS) / SUMMED_SPEEDS
-
-        # Execute program remotely
-        self.run_program(
-            'move.aesl',
-            DT                  = DELTA_T,
-            INV_INTEGR_CONST    = round(1 / INTEGRATION_CONSTANT),
-            DISTANCE            = millimeters,
-            LEFT_SPEED          = int(SPEED / Thymio.MILLIMETERS_PER_SECOND_PER_LSB),
-            RIGHT_SPEED         = int(SPEED / Thymio.MILLIMETERS_PER_SECOND_PER_LSB)
-        )
-
-    def turn(self, radians: float) -> None:
-
-        # Movement settings
-        DISTANCE = int(np.abs(radians * Thymio.WHEEL_PITCH / 2)) # Millimeters
-        DELTA_T = 25                    # Milliseconds
-        SPEED   = Thymio.MAX_SPEED      # Millimeters per seconds
-        SUMMED_SPEEDS = 2               # Both motors speed summed up in aseba code
-        MILLISECONDS_PER_SECONDS = 1000 # Obvious only if written down
-        INTEGRATION_CONSTANT = Thymio.MILLIMETERS_PER_SECOND_PER_LSB * (DELTA_T / MILLISECONDS_PER_SECONDS) / SUMMED_SPEEDS
-
-        # Execute program remotely
-        self.run_program(
-            'move.aesl',
-            DT                  = DELTA_T,
-            INV_INTEGR_CONST    = round(1 / INTEGRATION_CONSTANT),
-            DISTANCE            = DISTANCE,
-            LEFT_SPEED          = int(-np.sign(radians) * SPEED / Thymio.MILLIMETERS_PER_SECOND_PER_LSB),
-            RIGHT_SPEED         = int(np.sign(radians) * SPEED / Thymio.MILLIMETERS_PER_SECOND_PER_LSB)
-        )
