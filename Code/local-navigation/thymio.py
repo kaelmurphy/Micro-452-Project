@@ -100,7 +100,7 @@ class Thymio():
             return
         print(f'Going forward {millimeters} mm')
         self.run_program(
-            'move.aesl',
+            'move2.aesl',
             SCALE           = int(self.calibration.scale * 10000),
             TARGET          = millimeters,
             LEFT_DIRECTION  = '',
@@ -112,7 +112,7 @@ class Thymio():
             return
         print(f'Going backward {millimeters} mm')
         self.run_program(
-            'move.aesl',
+            'move2.aesl',
             SCALE           = int(self.calibration.scale * 10000),
             TARGET          = millimeters,
             LEFT_DIRECTION  = '-',
@@ -124,7 +124,7 @@ class Thymio():
             return
         print(f'Turning {radians:.3f} radians')
         self.run_program(
-            'move.aesl',
+            'move2.aesl',
             SCALE           = int(self.calibration.scale * 10000),
             TARGET          = int(np.abs(radians * self.calibration.pitch / 2)),
             LEFT_DIRECTION  = '' if np.sign(radians) < 0 else '-',

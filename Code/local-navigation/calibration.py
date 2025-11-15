@@ -27,4 +27,4 @@ def turn_test(calibration: Calibration) -> None:
 # Run test
 if __name__ == '__main__':
 
-    forward_test(THYMIO_482_CALIBRATION)
+    turn_test(THYMIO_482_CALIBRATION)
