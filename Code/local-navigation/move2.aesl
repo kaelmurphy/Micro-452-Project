@@ -1,0 +1,128 @@
+# Position estimation
+var l_um = 0
+var l_p_um = 0
+var l_p_mm = 0
+var r_um = 0
+var r_p_um = 0
+var r_p_mm = 0
+
+# Position error
+var l_e_um = 0
+var l_e_mm = 0
+var r_e_um = 0
+var r_e_mm = 0
+
+# Speed
+var l_speed = 0
+var r_speed = 0
+
+# Done flags
+var l_done = 0
+var r_done = 0
+var all_done = 0
+
+# Left wheel position regulation
+sub left_pos_reg
+
+	# Early return if done
+	if l_done == 1 then
+		return
+	end
+
+	# Update position estimate
+	call math.muldiv(l_um, abs motor.left.speed, {SCALE}, 10000)
+	l_p_um += l_um
+	l_p_mm += l_p_um / 1000
+	l_p_um %= 1000
+
+	# Compute position error
+  	l_e_mm = {TARGET} - l_p_mm
+	if l_p_um == 0 then
+		l_e_um = 0
+	else
+		l_e_mm--
+		l_e_um = 1000 - l_p_um
+	end
+
+	# Stop if within tolerance
+	if l_e_mm < 0 or (l_e_mm == 0 and l_e_um <= 100) then
+		motor.left.target = 0
+		l_done = 1
+		return
+	end
+
+	# Compute speed with smooth stop
+	if l_e_mm >= 20 then
+		l_speed = 500
+	else
+		l_speed = (1 + l_e_mm) * 25
+	end
+  	
+  	# Apply target speed
+	motor.left.target = {LEFT_DIRECTION} l_speed
+
+# Right wheel position regulation
+sub right_pos_reg
+
+	# Early return if done
+	if r_done == 1 then
+		return
+	end
+
+	# Update position estimate
+	call math.muldiv(r_um, abs motor.right.speed, {SCALE}, 10000)
+	r_p_um += r_um
+	r_p_mm += r_p_um / 1000
+	r_p_um %= 1000
+
+	# Compute position error
+  	r_e_mm = {TARGET} - r_p_mm
+	if r_p_um == 0 then
+		r_e_um = 0
+	else
+		r_e_mm--
+		r_e_um = 1000 - r_p_um
+	end
+
+	# Stop if within tolerance
+	if r_e_mm < 0 or (r_e_mm == 0 and r_e_um <= 100) then
+		motor.right.target = 0
+		r_done = 1
+		return
+	end
+
+	# Compute speed with smooth stop
+	if r_e_mm >= 20 then
+		r_speed = 500
+	else
+		r_speed = (1 + r_e_mm) * 25
+	end
+  	
+  	# Apply target speed
+	motor.right.target = {RIGHT_DIRECTION} r_speed
+
+onevent motor
+
+	# Early return if flag already set
+	if all_done == 1 then
+		return
+	end
+
+	# Call position regulation for both wheels
+	callsub left_pos_reg
+	callsub right_pos_reg
+
+	# Detect when both raise their 'done' flag
+	if l_done == 1 and r_done == 1 then
+		timer.period[0] = 2000
+		all_done = 1
+		emit done
+	end
+
+# Resend event if missed by the application
+onevent timer0
+
+	# Early return if done
+	if all_done == 1 then
+		emit done
+	end
