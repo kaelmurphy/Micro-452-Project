@@ -20,7 +20,7 @@ onevent motor
 	end
 
 	# Update position estimate
-	call math.muldiv(um, abs motor.left.speed + abs motor.right.speed, 15372, 10000)
+	call math.muldiv(um, abs motor.left.speed + abs motor.right.speed, {SCALE}, 20000)
 	p_um += um
 	p_mm += p_um / 1000
 	p_um %= 1000
@@ -52,8 +52,8 @@ onevent motor
 	end
   	
   	# Apply target speed
-	motor.left.target = {LEFT_SIGN}speed
-	motor.right.target = {RIGHT_SIGN}speed
+	motor.left.target = {LEFT_DIRECTION} speed
+	motor.right.target = {RIGHT_DIRECTION} speed
 
 # Resend event if missed by the application
 onevent timer0

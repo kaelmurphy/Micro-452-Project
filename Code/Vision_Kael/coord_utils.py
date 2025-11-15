@@ -1,118 +1,101 @@
 import numpy as np
 
-# persistent smoothing storage for stable coordinates across frames
-_prevState = {}
-# smoothing factor for exponential moving average (new_value_weight)
-# lower -> more smoothing (0.0..1.0)
-_smoothingAlpha = 0.4
+prevState = {}
+smoothingAlpha = 0.4
 
-def _smooth_tuple(key, name, val, alpha=_smoothingAlpha):
-    """
-    EMA-smooth a 2-tuple (x,y). Stores previous in _prevState under key/name.
-    """
+def smoothTuple(key, name, val):
+    '''
+    EMA-smooth tuple for stable coordinates across frames
+    '''
     if val is None:
         return None
-    prev = _prevState.get(key, {}).get(name)
+    # get previous smoothed value
+    prev = prevState.get(key, {}).get(name)
     cur = (float(val[0]), float(val[1]))
+    # no previous value, store and return current
     if prev is None:
-        _prevState.setdefault(key, {})[name] = cur
+        prevState.setdefault(key, {})[name] = cur
         return cur
-    # element-wise EMA
-    sm = (alpha * cur[0] + (1 - alpha) * prev[0], alpha * cur[1] + (1 - alpha) * prev[1])
-    _prevState.setdefault(key, {})[name] = sm
+    # apply exponential moving average to each component
+    sm = (smoothingAlpha * cur[0] + (1 - smoothingAlpha) * prev[0], 
+          smoothingAlpha * cur[1] + (1 - smoothingAlpha) * prev[1])
+    prevState.setdefault(key, {})[name] = sm
     return sm
 
-def _smooth_angle(key, name, angle, alpha=_smoothingAlpha):
-    """
-    smooth angle (radians) by EMA on unit-vector components.
-    """
+def smoothAngle(key, name, angle):
+    '''
+    smooth angle (degrees) using EMA on unit-vector components to avoid wrap-around issues
+    '''
     if angle is None:
         return None
-    prev_vec = _prevState.get(key, {}).get(name + "_vec")
-    cur_vec = np.array([np.cos(angle), np.sin(angle)], dtype=float)
-    if prev_vec is None:
-        _prevState.setdefault(key, {})[name + "_vec"] = cur_vec
-        _prevState.setdefault(key, {})[name] = float(angle)
+    # get previous smoothed unit vector
+    prevVec = prevState.get(key, {}).get(name + "_vec")
+    # convert angle to unit vector
+    rad = angle * np.pi / 180.0
+    curVec = np.array([np.cos(rad), np.sin(rad)])
+    # no previous value, store and return current
+    if prevVec is None:
+        prevState.setdefault(key, {})[name + "_vec"] = curVec
+        prevState.setdefault(key, {})[name] = float(angle)
         return float(angle)
-    sm_vec = alpha * cur_vec + (1 - alpha) * prev_vec
-    # store
-    _prevState.setdefault(key, {})[name + "_vec"] = sm_vec
-    ang = float(np.arctan2(sm_vec[1], sm_vec[0]))
-    _prevState.setdefault(key, {})[name] = ang
+    # smooth unit vector components
+    smVec = smoothingAlpha * curVec + (1 - smoothingAlpha) * prevVec
+    prevState.setdefault(key, {})[name + "_vec"] = smVec
+    # convert smoothed unit vector back to angle in degrees
+    ang = float(np.arctan2(smVec[1], smVec[0]) * 180.0 / np.pi)
+    prevState.setdefault(key, {})[name] = ang
     return ang
 
-def _as_xy(val):
-    """
-    normalize value to an (x,y) pair of floats or return None.
-    """
+def asXy(val):
+    '''
+    normalize value to (x,y) tuple of floats or return None
+    '''
     if val is None:
         return None
     try:
-        x = float(val[0])
-        y = float(val[1])
-        return (x, y)
-    except Exception:
+        return (float(val[0]), float(val[1]))
+    except:
         return None
 
 
 def worldToZone(point, zone):
-    """
-    Map a world-image point (x,y) into zone-local coordinates (u,v).
-
-    zone: dict with 'corners' == [tl, tr, br, bl] in image coordinates (or world coords).
-    Returns (u, v) where u and v are coordinates in the basis (tl->tr, tl->bl).
-    If zone corners are not available, returns None.
-    """
+    '''
+    map world point (x,y) in mm to zone-local coordinates (u,v) in [0,1] range using skew-tolerant basis vectors: origin at BL, x-axis along bottom edge, y-axis along left edge
+    '''
     if not zone or 'corners' not in zone or not zone['corners']:
         return None
+    # extract corners: [tl, tr, br, bl]
     tl, tr, br, bl = zone['corners']
-    tl = np.array(tl, dtype=float)
-    tr = np.array(tr, dtype=float)
-    bl = np.array(bl, dtype=float)
     p = np.array(point, dtype=float)
-
-    # basis vectors
-    ex = tr - tl
-    ey = bl - tl
-
-    # build 2x2 matrix [ex ey]
-    M = np.column_stack((ex, ey))
+    bl = np.array(bl, dtype=float)
+    # basis vectors from bottom-left corner
+    ex = np.array(br, dtype=float) - bl
+    ey = np.array(tl, dtype=float) - bl
     try:
-        coeffs = np.linalg.solve(M, (p - tl))
-    except np.linalg.LinAlgError:
+        # solve for coefficients: p = bl + u*ex + v*ey
+        coeffs = np.linalg.solve(np.column_stack((ex, ey)), p - bl)
+        return (float(coeffs[0]), float(coeffs[1]))
+    except:
         return None
 
-    u, v = float(coeffs[0]), float(coeffs[1])
-    return (u, v)
 
-
-def robotWorldPose(centers, cornersMap=None, robotId=8):
-    """
-    compute robot center (x,y) in world/image coordinates and orientation theta (radians)
-    using marker corners if available. Returns (cx, cy, theta) or (None, None, None)
-    if robot not found.
-
-    theta is angle of vector from marker center to top-middle edge
-    in image pixel coordinates, in range [-pi, pi].
-    """
+def robotWorldPose(centers, cornersMap, robotId):
+    '''
+    compute robot center (x,y) and orientation theta (radians) from marker corners
+    '''
     if robotId not in centers:
         return (None, None, None)
-
-    # center from centers dict
-    c = centers[robotId]
+    # extract center coordinates
     try:
-        cx, cy = int(c[0]), int(c[1])
-    except Exception:
+        cx, cy = int(centers[robotId][0]), int(centers[robotId][1])
+    except:
         return (None, None, None)
-
-    # compute orientation using corners if available
+    # compute orientation from marker corners if available
     if cornersMap and robotId in cornersMap:
-        arr = np.asarray(cornersMap[robotId], dtype=float)
-        # top-left is arr[0], top-right arr[1]
-        topMid = np.array([(arr[0,0] + arr[1,0]) / 2.0, (arr[0,1] + arr[1,1]) / 2.0])
-        vec = topMid - np.array([cx, cy], dtype=float)
-        theta = float(np.arctan2(vec[1], vec[0]))
+        arr = cornersMap[robotId].astype(float)
+        # midpoint of top edge (between top-left and top-right corners)
+        topMid = (arr[0] + arr[1]) / 2.0
+        # angle from center to top midpoint
+        theta = float(np.arctan2(topMid[1] - cy, topMid[0] - cx))
         return (cx, cy, theta)
-
-    # fallback: no corners available, we can't determine heading reliably
     return (cx, cy, None)

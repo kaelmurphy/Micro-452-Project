@@ -5,15 +5,39 @@
 # Imports
 from tdmclient import ClientAsync
 from tdmclient.clientasyncnode import ClientAsyncNode
+import numpy as np
+
+# Calibration class
+class Calibration():
+    """
+    Calibration class for a Thymio robot
+
+    Two values must be calibrated:
+
+        - scale : Coder scale (um/lsb)
+
+        - pitch : Wheel pitch (mm)
+    """
+
+    def __init__(self, scale: float, pitch: float) -> None:
+        self._scale = scale
+        self._pitch = pitch
+
+    @property
+    def scale(self) -> float:
+        return self._scale
+    
+    @property
+    def pitch(self) -> float:
+        return self._pitch
 
 # Thymio class
 class Thymio():
 
-    # Thymio settings
-    WHEEL_PITCH         = 91.67329  # Millimeters
-    DONE_POLLING_PERIOD = 0.1   # Seconds
+    DONE_POLLING_PERIOD = 0.1 # Seconds
 
-    def __init__(self) -> None:
+    def __init__(self, calibration: Calibration) -> None:
+        self.calibration = calibration
         self.done = False
         self.programPath = None
         self.programSource = None
@@ -70,3 +94,39 @@ class Thymio():
         
         # Run program
         self.client.run_async_program(self.execute)
+
+    def forward(self, millimeters: int) -> None:
+        if millimeters == 0:
+            return
+        print(f'Going forward {millimeters} mm')
+        self.run_program(
+            'move.aesl',
+            SCALE           = int(self.calibration.scale * 10000),
+            TARGET          = millimeters,
+            LEFT_DIRECTION  = '',
+            RIGHT_DIRECTION = ''
+        )
+
+    def backward(self, millimeters: int) -> None:
+        if millimeters == 0:
+            return
+        print(f'Going backward {millimeters} mm')
+        self.run_program(
+            'move.aesl',
+            SCALE           = int(self.calibration.scale * 10000),
+            TARGET          = millimeters,
+            LEFT_DIRECTION  = '-',
+            RIGHT_DIRECTION = '-'
+        )
+
+    def turn(self, radians: float) -> None:
+        if radians == 0:
+            return
+        print(f'Turning {radians:.3f} radians')
+        self.run_program(
+            'move.aesl',
+            SCALE           = int(self.calibration.scale * 10000),
+            TARGET          = int(np.abs(radians * self.calibration.pitch / 2)),
+            LEFT_DIRECTION  = '' if np.sign(radians) < 0 else '-',
+            RIGHT_DIRECTION = '-' if np.sign(radians) < 0 else ''
+        )
