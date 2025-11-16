@@ -154,3 +154,20 @@ class Thymio():
             TARGET_Y_MM = y,
             TARGET_THETA = int(np.round(2**15 * theta / np.pi))
         )
+
+    def avoid(self) -> None:
+        print(f'Avoiding obstacle')
+        self.run_program(
+            'avoid.aesl',
+
+            # Initial position
+            X_MM = 0,
+            X_UM = 0,
+            Y_MM = 0,
+            Y_UM = 0,
+            THETA = 0,
+
+            # Calibration
+            SCALE = int(np.round(10000 * self.calibration.scale)),
+            PITCH = int(np.round(10 * 2**15 / (np.pi * self.calibration.pitch)))
+        )

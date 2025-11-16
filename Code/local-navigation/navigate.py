@@ -60,4 +60,5 @@ if __name__ == '__main__':
 
     with Thymio(THYMIO_482_CALIBRATION) as thymio:
 
-        thymio.astolfi(0, 0, np.pi / 2)
+        # thymio.astolfi(0, 0, np.pi / 2)
+        thymio.avoid()

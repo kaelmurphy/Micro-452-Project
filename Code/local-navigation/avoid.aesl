@@ -1,0 +1,101 @@
+# Pose
+var x_mm = {X_MM}
+var x_um = {X_UM}
+var y_mm = {Y_MM}
+var y_um = {Y_UM}
+var theta = {THETA}
+
+# Odometry
+var d_s_um = 0
+var x_l_um = 0
+var x_r_um = 0
+var d_theta = 0
+var theta_half = 0
+var cos_half = 0
+var sin_half = 0
+var d_x_um = 0
+var d_y_um = 0
+
+# Avoidance
+var prox_delayed[50]
+var i = 0
+var state = 0
+
+onevent motor
+
+	# ===================================== #
+	#            Pose estimation            #
+	# ===================================== #
+
+    # Compute wheel increment
+    call math.muldiv(x_l_um, motor.left.speed,  {SCALE}, 10000)
+    call math.muldiv(x_r_um, motor.right.speed, {SCALE}, 10000)
+
+    # Compute linear and angular increments
+    d_s_um = (x_l_um + x_r_um) >> 1
+	call math.muldiv(d_theta, x_r_um - x_l_um, {PITCH}, 10000)
+
+    # Find mean heading
+    theta_half = theta + (d_theta >> 1)
+    theta = theta + d_theta
+
+    # Compute x and y change
+    call math.cos(cos_half, theta_half)
+    call math.sin(sin_half, theta_half)
+    call math.muldiv(d_x_um, d_s_um, cos_half, 32767)
+    call math.muldiv(d_y_um, d_s_um, sin_half, 32767)
+
+    # Accumulate coarse / fine x and y
+    x_um += d_x_um
+    x_mm += x_um / 1000
+    x_um %= 1000
+    y_um += d_y_um
+    y_mm += y_um / 1000
+    y_um %= 1000
+
+onevent prox
+
+    # ===================================== #
+	#            Obstacle avoidance         #
+	# ===================================== #
+
+    # Turn away from obstacle
+    if state == 0 then
+        if prox.horizontal[2] > 0 or prox.horizontal[3] > 0 or prox.horizontal[4] > 0 then
+            motor.left.target = -100
+            motor.right.target = 100
+        else
+            for i in 0:49 do
+                prox_delayed[i] = 0
+            end
+            state = 1
+        end
+
+    # Follow side of obstacle
+    elseif state == 1 then
+
+        # Delay decision making
+        if prox.horizontal[4] > 0 then
+            for i in 0:49 do
+                prox_delayed[i] = prox.horizontal[4]
+            end
+        else
+            for i in 48:0 step -1 do
+                prox_delayed[i + 1] = prox_delayed[i]
+            end
+            prox_delayed[0] = prox.horizontal[4]
+        end
+
+        motor.left.target = 100
+        if prox_delayed[49] == 0 then
+            motor.right.target = -100
+        else
+            motor.right.target = 100
+        end
+
+    # Stop motors when target reached
+    else
+        motor.left.target = 0
+        motor.right.target = 0
+        emit done
+    end
