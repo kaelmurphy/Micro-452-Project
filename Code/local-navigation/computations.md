@@ -160,5 +160,49 @@ $$
 \end{equation}
 $$
 
-The conversion factor we get is smalled that $1$, which means that some bits of precision will be lost. To account for them, the computation need to be divided into smaller units :
+Here again, two variables can be used to not lose any increment due to integer rounding. $|\Delta x_R - \Delta x_L| \approx 3$, so using only this will lose incrments $1$ to $3$.
 
+## Controller
+
+### Astolfi
+
+The pose estimation is perfectly suited for an Astolfi controller, with the change of coordiates :
+$$
+\begin{align}
+\rho &= \sqrt{\Delta x^2 + \Delta y^2} \\
+\alpha &= \text{atan2}(\Delta y, \Delta x) - \theta \\
+\beta &= \Delta \theta -\alpha
+\end{align}
+$$
+
+Here $\rho$ is the distance to the target, $\alpha$ the robot to target heading error, and $\beta$ the final target heading error. The control law is :
+$$
+\begin{align}
+v &= k_\rho \cdot \rho \\
+\omega &= k_\alpha \cdot \alpha + k_\beta \cdot \beta \\
+k_\rho &> 0, k_\beta < 0, k_\alpha - k_\rho > 0
+\end{align}
+$$
+
+This controller offer a nice spline motion, but it gets numerically unstable as the robot reach the goal. When $(\Delta x, \Delta y) \rightarrow (0, 0)$, the function $\text{atan2}$ tends to jump around, and the angles $\alpha$ and $\beta$ tends to fight for angular velocity.
+
+### Modified controller
+
+To fix this, we need a new framework. Lets only take the distance error $e$ and the the robot to target heading error $\varepsilon$ to release one constraint :
+$$
+\begin{align}
+e &= \sqrt{\Delta x^2 + \Delta y^2} \\
+\varepsilon &= \text{atan2}(\Delta y, \Delta x) - \theta
+\end{align}
+$$
+
+Then let the controller be defined as :
+$$
+\begin{align}
+v &= k_e \cdot e \cdot \frac{|\varepsilon|}{\pi} \\
+\omega &= k_\omega \cdot \varepsilon \cdot \min(e, e_{\max}) \\
+k_e &> 0, k_\omega < 0
+\end{align}
+$$
+
+This way, the $v$ tends to $0$ if the robot is not heading in the right direction, and otherwise act as a classic P controller. $\omega$ also tends to $0$ under a threshold $e_{\max}$.

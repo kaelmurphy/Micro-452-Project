@@ -8,33 +8,34 @@ from calibration import THYMIO_482_CALIBRATION
 import numpy as np
 
 # Navigation routine
-def navigate(path: np.ndarray, calibration: Calibration) -> None:
-
-    # Helper function to wrap angles between -PI and PI
-    wrap = lambda radians: (radians + np.pi) % (2 * np.pi) - np.pi
+def navigate(path: np.ndarray, direction: float, calibration: Calibration) -> None:
 
     # Connect to thymio
     with Thymio(calibration) as thymio:
 
+        # Set initial pose
+        thymio.x = path[0][0]
+        thymio.y = path[0][1]
+        thymio.theta = direction
+
         # For each waypoint
-        currentDirection = 0
-        for i in range(path.shape[0] - 1):
+        for i in range(1, path.shape[0]):
 
-            # Compute motion vector and direction
-            waypointVector = path[i + 1] - path[i]
-            waypointDirection = np.angle(complex(waypointVector[0], waypointVector[1]))
+            # Move toward waypoint
+            match thymio.move(path[i][0], path[i][1]):
 
-            # Turn toward waypoint
-            radians = wrap(waypointDirection - currentDirection)
-            thymio.turn(radians)
-            currentDirection = wrap(currentDirection + radians)
+                # When waypoint is reached, 
+                case 'done':
+                    i += 1
 
-            # Move to waypoint
-            millimeters = int(np.linalg.norm(waypointVector))
-            thymio.forward(millimeters)
+                # If obstacle is reached
+                case 'obstacle':
+                    thymio.avoid() # TODO detect if thymio passed last waypoint when moving
 
-            # Next waypoint
-            i += 1
+            # Do high level filtering and decision making
+            _ = thymio.x
+            _ = thymio.y
+            _ = thymio.theta
 
 # Test function
 def navigate_eight(calibration: Calibration) -> None:
@@ -51,14 +52,9 @@ def navigate_eight(calibration: Calibration) -> None:
         square.append([0,   200])
         square.append([0,   0])
 
-    navigate(np.array(square), calibration)
+    navigate(np.array(square), 0, calibration)
 
 # Run test
 if __name__ == '__main__':
 
-    # navigate_eight(THYMIO_482_CALIBRATION)
-
-    with Thymio(THYMIO_482_CALIBRATION) as thymio:
-
-        # thymio.astolfi(0, 0, np.pi / 2)
-        thymio.avoid()
+    navigate_eight(THYMIO_482_CALIBRATION)

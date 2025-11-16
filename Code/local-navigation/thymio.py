@@ -3,7 +3,7 @@
 # Brief     : Thymio class, handle connection, programs compilation and execution
 
 # Imports
-from tdmclient import ClientAsync
+from tdmclient import ClientAsync, aw
 from tdmclient.clientasyncnode import ClientAsyncNode
 import numpy as np
 
@@ -16,54 +16,110 @@ class Calibration():
 
         - scale : Coder scale (um/lsb)
 
-        - pitch : Wheel pitch (mm)
+        - track : Wheel track (mm)
     """
 
-    def __init__(self, scale: float, pitch: float) -> None:
+    def __init__(self, scale: float, track: float) -> None:
         self._scale = scale
-        self._pitch = pitch
+        self._track = track
 
     @property
     def scale(self) -> float:
         return self._scale
     
     @property
-    def pitch(self) -> float:
-        return self._pitch
+    def track(self) -> float:
+        return self._track
 
 # Thymio class
 class Thymio():
 
-    DONE_POLLING_PERIOD = 0.1 # Seconds
+    # Constants
+    EVENTS_POLLING_PERIOD   = 0.1   # Seconds
+    SEGMENT_TOLERANCE       = 5     # Millimeters
 
+    # Constructor
     def __init__(self, calibration: Calibration) -> None:
+        
+        # Robot calibration
         self.calibration = calibration
-        self.done = False
+
+        # Robot pose
+        self._x = 0
+        self._y = 0
+        self._theta = 0
+
+        # Program executor
         self.programPath = None
         self.programSource = None
+        self.event = None
+        self.segment = 0
+
+        # Thymio client
         self.client = ClientAsync()
 
+    # Context manager
     def __enter__(self) -> 'Thymio':
         self.client.__enter__()
-        self.client.add_event_received_listener(self.on_event_received)
+        self.client.add_event_received_listener(self.on_event_received) # TODO lock and unlock node here
         return self
 
     def __exit__(self, type, value, traceback) -> None:
         self.client.__exit__(type, value, traceback)
 
-    def on_event_received(self, node, event_name, event_data):
-        if event_name == 'done':
-            self.done = True
+    # Pose getters and setters
+    @property
+    def x(self) -> int:
+        return self._x
+    
+    @x.setter
+    def x(self, value: int) -> None:
+        self._x = max(-32768, min(value, 32767))
 
+    @property
+    def y(self) -> int:
+        return self._y
+    
+    @y.setter
+    def y(self, value: int) -> None:
+        self._y = max(-32768, min(value, 32767))
+
+    @property
+    def theta(self) -> float:
+        return self._theta
+        # return np.pi * float(self._theta) / 32767
+
+    @theta.setter
+    def theta(self, value) -> int:
+        self._theta = value
+        # return int(np.round(32767 * ((value + np.pi) % (2 * np.pi) - np.pi) / np.pi))
+
+    # Event handler
+    def on_event_received(self, node, event_name, event_data):
+
+        # Capture only one event
+        if self.event is None:
+            self.event = event_name
+        else:
+            return
+
+        # Save estimated pose
+        if self.event == 'avoided':
+            self._x = event_data[0]
+            self._y = event_data[1]
+            self._theta = event_data[2]
+
+    # Program executor
     async def execute(self):
 
         node: ClientAsyncNode
         with await self.client.lock() as node:
 
             # Register events
-            self.done = False
+            self.event = None
             error = await node.register_events([
-                ('done', 0)
+                ('done', 0),
+                ('obstacle', 0)
             ])
             if error is not None:
                 raise RuntimeError(f'Event registration error: {error}')
@@ -80,10 +136,10 @@ class Thymio():
                 raise RuntimeError(f'Error {error['error_code']}')
             
             # Wait until program is done
-            while not self.done:
-                await self.client.sleep(Thymio.DONE_POLLING_PERIOD)
+            while self.event is None:
+                await self.client.sleep(Thymio.EVENTS_POLLING_PERIOD)
 
-    def run_program(self, path: str, **kwargs) -> None:
+    def run_program(self, path: str, **kwargs) -> str:
 
         # Load program
         self.programPath = path
@@ -91,83 +147,98 @@ class Thymio():
             source = file.read()
             self.programPath = path
             self.programSource = source.format(**kwargs)
-            print(self.programSource)
         
         # Run program
         self.client.run_async_program(self.execute)
+        return self.event
 
-    def forward(self, millimeters: int) -> None:
-        if millimeters == 0:
-            return
-        print(f'Going forward {millimeters} mm')
-        self.run_program(
-            'move2.aesl',
+    # Programs
+    def astolfi(self, x: int, y: int) -> str:
+        print(f'Moving to ({x}, {y})')
+        return self.run_program(
+            'legacy/astolfi2.aesl',
+
+            # Initial position
+            X_MM = self._x,
+            Y_MM = self._y,
+            THETA = self._theta,
+
+            # Calibration
+            SCALE = int(np.round(10000 * self.calibration.scale)),
+            TRACK = int(np.round(10 * 2**15 / (np.pi * self.calibration.track))),
+
+            # Target
+            TARGET_X_MM = x,
+            TARGET_Y_MM = y
+        )
+    
+    def forward(self, millimeters: int) -> str:
+        print(f'Moving {millimeters} millimeters')
+        return self.run_program(
+            'move.aesl',
             SCALE           = int(self.calibration.scale * 10000),
             TARGET          = millimeters,
             LEFT_DIRECTION  = '',
             RIGHT_DIRECTION = ''
         )
 
-    def backward(self, millimeters: int) -> None:
-        if millimeters == 0:
-            return
-        print(f'Going backward {millimeters} mm')
-        self.run_program(
-            'move2.aesl',
-            SCALE           = int(self.calibration.scale * 10000),
-            TARGET          = millimeters,
-            LEFT_DIRECTION  = '-',
-            RIGHT_DIRECTION = '-'
-        )
-
-    def turn(self, radians: float) -> None:
-        if radians == 0:
-            return
+    def turn(self, radians: float) -> str:
         print(f'Turning {radians:.3f} radians')
-        self.run_program(
-            'move2.aesl',
+        return self.run_program(
+            'move.aesl',
             SCALE           = int(self.calibration.scale * 10000),
-            TARGET          = int(np.abs(radians * self.calibration.pitch / 2)),
+            TARGET          = int(np.abs(radians * self.calibration.track / 2)),
             LEFT_DIRECTION  = '' if np.sign(radians) < 0 else '-',
             RIGHT_DIRECTION = '-' if np.sign(radians) < 0 else ''
         )
 
-    def astolfi(self, x: int, y: int, theta: float) -> None:
-        print(f'Going to coordinate ({x}, {y}) mm with angle {theta} radians')
-        theta = (theta + np.pi) % (2 * np.pi) - np.pi
-        self.run_program(
-            'astolfi.aesl',
+    def move(self, x: int, y: int) -> str:
+        print(f'Moving to ({x}, {y})')
 
-            # Initial position
-            X_MM = 0,
-            X_UM = 0,
-            Y_MM = 0,
-            Y_UM = 0,
-            THETA = 0,
+        # Compute motion vector and direction
+        wrap = lambda radians: (radians + np.pi) % (2 * np.pi) - np.pi
+        vector = np.array([x - self.x, y - self.y])
+        direction = np.angle(complex(vector[0], vector[1]))
 
-            # Calibration
-            SCALE = int(np.round(10000 * self.calibration.scale)),
-            PITCH = int(np.round(10 * 2**15 / (np.pi * self.calibration.pitch))),
+        # Turn
+        radians = wrap(direction - self.theta)
+        self.turn(radians)
 
-            # Target
-            TARGET_X_MM = x,
-            TARGET_Y_MM = y,
-            TARGET_THETA = int(np.round(2**15 * theta / np.pi))
-        )
+        # Advance
+        millimeters = int(np.linalg.norm(vector))
+        result = self.forward(millimeters)
 
-    def avoid(self) -> None:
+        # Update pose
+        self.x = x
+        self.y = y
+        self.theta = wrap(self.theta + radians)
+        return result
+
+    def avoid(self) -> str:
         print(f'Avoiding obstacle')
-        self.run_program(
+        return self.run_program(
             'avoid.aesl',
 
             # Initial position
-            X_MM = 0,
-            X_UM = 0,
-            Y_MM = 0,
-            Y_UM = 0,
-            THETA = 0,
+            X_MM    = self._x,
+            Y_MM    = self._y,
+            THETA   = self._theta,
 
             # Calibration
-            SCALE = int(np.round(10000 * self.calibration.scale)),
-            PITCH = int(np.round(10 * 2**15 / (np.pi * self.calibration.pitch)))
+            SCALE   = int(np.round(10000 * self.calibration.scale)),
+            TRACK   = int(np.round(10 * 2**15 / (np.pi * self.calibration.track))),
+
+            # Collider geometry
+            C_1     = 0,
+            S_1     = 0,
+            X_MIN_1 = 0,
+            X_MAX_1 = 0,
+            Y_MIN_1 = 0,
+            Y_MAX_1 = 0,
+            C_2     = 0,
+            S_2     = 0,
+            X_MIN_2 = 0,
+            X_MAX_2 = 0,
+            Y_MIN_2 = 0,
+            Y_MAX_2 = 0
         )
