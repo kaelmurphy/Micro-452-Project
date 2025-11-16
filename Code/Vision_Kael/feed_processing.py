@@ -37,16 +37,17 @@ def getOperatingState(state):
         output['robot'] = {'x': robot[0], 'y': robot[1], 'theta': theta}
     return output
 
-def detectAndDrawObstacles(canvas, edges, pixelToWorld, zoneCornersMm, minArea=500, maxVertices=10):
+def detectAndDrawObstacles(canvas, edges, pixelToWorld, zoneWorldCorners, minArea=500, maxVertices=10):
     '''
-    detect obstacles from edges, draw on canvas, return Obstacle objects with vertices in mm
+    detect obstacles from edges, draw on canvas, return Obstacle objects with vertices in zone coordinates (mm)
     '''
-    if not zoneCornersMm:
+    if not zoneWorldCorners:
         return canvas, [], (0, 0)
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # zone dimensions: corners = [tl, tr, br, bl]
-    bottomLen = np.linalg.norm(np.array(zoneCornersMm[2]) - np.array(zoneCornersMm[3]))  # BR to BL
-    leftLen = np.linalg.norm(np.array(zoneCornersMm[0]) - np.array(zoneCornersMm[3]))  # TL to BL
+    # zone dimensions: corners = [tl, tr, br, bl] in world coordinates
+    tl, tr, br, bl = zoneWorldCorners
+    bottomLen = np.linalg.norm(np.array(br) - np.array(bl))  # BR to BL
+    leftLen = np.linalg.norm(np.array(tl) - np.array(bl))  # TL to BL
     obstacles = []
     for i, contour in enumerate(contours):
         # filter by area and vertex count
@@ -58,13 +59,14 @@ def detectAndDrawObstacles(canvas, edges, pixelToWorld, zoneCornersMm, minArea=5
             continue
         obstacle = Obstacle(i)
         pixelPts = []
-        # convert each vertex to mm coordinates
+        # convert each vertex to zone coordinates in mm
         for pt in approx:
             px, py = pt[0]
             pixelPts.append([px, py])
             # convert to zone coordinates then scale by zone dimensions
-            zonePt = worldToZone(pixelToWorld((px, py)), {'corners': zoneCornersMm})
+            zonePt = worldToZone(pixelToWorld((px, py)), {'corners': zoneWorldCorners})
             if zonePt and -0.1 <= zonePt[0] <= 1.1 and -0.1 <= zonePt[1] <= 1.1:
+                # convert to zone coordinates in mm (BL corner = 0,0)
                 obstacle.addVertex(zonePt[0] * bottomLen, zonePt[1] * leftLen)
         # only keep obstacles with at least 3 vertices
         if len(obstacle.getVertices()) >= 3:
@@ -110,28 +112,37 @@ def createCanvasAndState(frame, robotId=8, goalId=9, edgeParams={'low': 25, 'hig
             pixelsPerMm = lineLen / 50.0  # 50mm = full marker height
     # conversion function: pixel coords to world coords in mm with bottom-left origin
     pixelToWorld = lambda pt: (pt[0] / pixelsPerMm, (frameH - 1 - pt[1]) / pixelsPerMm)
-    # convert zone corners to mm
-    zoneCornersMm = None
+    # convert zone corners to world coordinates first
+    zoneWorldCorners = None
     zoneDims = (0, 0)
+    zoneCornersMm = None
     if zone and zone.get('corners'):
-        zoneCornersMm = [pixelToWorld(c) for c in zone['corners']]
-    # detect obstacles and get zone dimensions
-    canvas, obstacles, zoneDims = detectAndDrawObstacles(canvas, edges, pixelToWorld, zoneCornersMm)
+        zoneWorldCorners = [pixelToWorld(c) for c in zone['corners']]
+        # calculate zone dimensions in mm
+        tl, tr, br, bl = zoneWorldCorners
+        bottomLen = np.linalg.norm(np.array(br) - np.array(bl))  # BR to BL
+        leftLen = np.linalg.norm(np.array(tl) - np.array(bl))  # TL to BL
+        zoneDims = (bottomLen, leftLen)
+        # create zone coordinate system with BL as (0,0)
+        # corners in zone coordinates: BL(0,0), BR(width,0), TR(width,height), TL(0,height)
+        zoneCornersMm = [(0, 0), (bottomLen, 0), (bottomLen, leftLen), (0, leftLen)]
+    # detect obstacles using world coordinates for detection but zone coordinates for output
+    canvas, obstacles, _ = detectAndDrawObstacles(canvas, edges, pixelToWorld, zoneWorldCorners)
     # draw robot and goal markers
     canvas = drawRobotGoal(canvas, cornersMap if cornersMap else centers, robotId, goalId)
 
     # process goal position
     goalZone = None
-    if goalId in centers and zoneCornersMm and zoneDims[0] > 0:
+    if goalId in centers and zoneWorldCorners and zoneDims[0] > 0:
         # convert goal to zone coordinates then scale to mm
-        gz = worldToZone(pixelToWorld(centers[goalId]), {'corners': zoneCornersMm})
+        gz = worldToZone(pixelToWorld(centers[goalId]), {'corners': zoneWorldCorners})
         if gz:
             goalZone = (gz[0] * zoneDims[0], gz[1] * zoneDims[1])
     # process robot position and orientation
     robotZone = None
     robotThetaZone = None
     rCx, rCy, _ = robotWorldPose(centers, cornersMap, robotId)
-    if rCx and zoneCornersMm and cornersMap and robotId in cornersMap:
+    if rCx and zoneWorldCorners and cornersMap and robotId in cornersMap:
         # convert robot center to world coordinates
         robotWorld = pixelToWorld((rCx, rCy))
         arr = cornersMap[robotId].astype(float)
@@ -141,12 +152,12 @@ def createCanvasAndState(frame, robotId=8, goalId=9, edgeParams={'low': 25, 'hig
         # compute robot orientation in world frame
         robotThetaWorld = np.arctan2(topMidWorld[1] - robotWorld[1], topMidWorld[0] - robotWorld[0])
         # convert robot position to zone coordinates
-        rz = worldToZone(robotWorld, {'corners': zoneCornersMm})
+        rz = worldToZone(robotWorld, {'corners': zoneWorldCorners})
         if rz and zoneDims[0] > 0:
             robotZone = (rz[0] * zoneDims[0], rz[1] * zoneDims[1])
             # theta relative to zone bottom edge (0° = right along bottom edge)
-            edgeAngle = np.arctan2(zoneCornersMm[2][1] - zoneCornersMm[3][1], 
-                                   zoneCornersMm[2][0] - zoneCornersMm[3][0])
+            tl, tr, br, bl = zoneWorldCorners
+            edgeAngle = np.arctan2(br[1] - bl[1], br[0] - bl[0])
             robotThetaZone = np.degrees(robotThetaWorld - edgeAngle)
             robotThetaZone = ((robotThetaZone + 180) % 360) - 180  # normalize to [-180, 180]
     # build state dictionary with smoothed coordinates
@@ -158,16 +169,17 @@ def createCanvasAndState(frame, robotId=8, goalId=9, edgeParams={'low': 25, 'hig
     # draw status text on canvas
     lines = []
     if state['zoneCorners']:
-        tl, tr, br, bl = state['zoneCorners']
-        lines.append(f"BL:({bl[0]:.1f},{bl[1]:.1f}) BR:({br[0]:.1f},{br[1]:.1f})")
-        lines.append(f"TL:({tl[0]:.1f},{tl[1]:.1f}) TR:({tr[0]:.1f},{tr[1]:.1f})")
+        bl, br, tr, tl = state['zoneCorners']  # zone coordinates: BL, BR, TR, TL
+        lines.append(f"Zone (mm) - BL:({bl[0]:.1f},{bl[1]:.1f}) BR:({br[0]:.1f},{br[1]:.1f})")
+        lines.append(f"Zone (mm) - TL:({tl[0]:.1f},{tl[1]:.1f}) TR:({tr[0]:.1f},{tr[1]:.1f})")
+        lines.append(f"Zone size: {br[0]:.1f}mm × {tl[1]:.1f}mm")
     if asXy(state['goal']):
         gx, gy = state['goal']
-        lines.append(f"Goal: x={gx:.1f}mm y={gy:.1f}mm")
+        lines.append(f"Goal: x={gx:.1f}mm y={gy:.1f}mm (zone coords)")
     if asXy(state['robot']):
         rx, ry = state['robot']
-        theta = f"{state['robotTheta']:.1f}°" if state['robotTheta'] is not None else "n/a"
-        lines.append(f"Robot: x={rx:.1f}mm y={ry:.1f}mm θ={theta}")
+        theta = f"{state['robotTheta']:.1f}" if state['robotTheta'] is not None else "n/a"
+        lines.append(f"Robot: x={rx:.1f}mm y={ry:.1f}mm angle={theta} (degrees) (zone coords)")
     # draw text with black outline and white fill
     for i, txt in enumerate(reversed(lines)):
         y = canvas.shape[0] - 8 - (i * 20)
