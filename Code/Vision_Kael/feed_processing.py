@@ -1,188 +1,266 @@
 import cv2
 import numpy as np
 from aruco_utils import detectAruco, buildOperatingZone
-from draw_utils import drawOperatingZone, drawRobotGoal
-from coord_utils import worldToZone, robotWorldPose, smoothTuple, smoothAngle, asXy
-from obstacle import Obstacle
+from draw_utils import drawOperatingZone
+from coord_utils import robotWorldPose, asXy
 
-def detectEdges(frame, low=30, high=100, blur=3):
-    '''
-    detect edges using Canny with CLAHE preprocessing
-    '''
-    # convert to grayscale
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    # apply contrast-limited adaptive histogram equalization
-    gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-    # apply median blur to reduce noise
-    if blur > 0:
-        gray = cv2.medianBlur(gray, blur | 1)
-    # detect edges using Canny
-    return cv2.Canny(gray, low, high)
+robotId = 8
+goalId = 9
 
-def getOperatingState(state):
-    '''
-    extract clean output dictionary with all coordinates in mm and angles in degrees for use by path planning module
-    '''
-    # initialize output with zone corners and obstacles
-    output = {'zoneCorners': state.get('zoneCorners'), 'obstacles': state.get('obstacles', []), 
-              'goal': None, 'robot': None}
-    # add goal if detected
-    goal = state.get('goal')
-    if goal:
-        output['goal'] = {'x': goal[0], 'y': goal[1]}
-    # add robot if detected
-    robot = state.get('robot')
-    theta = state.get('robotTheta')
-    if robot and theta is not None:
-        output['robot'] = {'x': robot[0], 'y': robot[1], 'theta': theta}
-    return output
+# simple stability tracking
+stability_buffer = []
+stable_screenshot = None
+is_stable = False
+STABILITY_FRAMES = 100
+STABILITY_THRESHOLD = 5.0
 
-def detectAndDrawObstacles(canvas, edges, pixelToWorld, zoneWorldCorners, minArea=500, maxVertices=10):
-    '''
-    detect obstacles from edges, draw on canvas, return Obstacle objects with vertices in zone coordinates (mm)
-    '''
-    if not zoneWorldCorners:
-        return canvas, [], (0, 0)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # zone dimensions: corners = [tl, tr, br, bl] in world coordinates
-    tl, tr, br, bl = zoneWorldCorners
-    bottomLen = np.linalg.norm(np.array(br) - np.array(bl))  # BR to BL
-    leftLen = np.linalg.norm(np.array(tl) - np.array(bl))  # TL to BL
-    obstacles = []
-    for i, contour in enumerate(contours):
-        # filter by area and vertex count
-        if cv2.contourArea(contour) < minArea or len(contour) > maxVertices:
-            continue
-        # approximate contour to polygon
-        approx = cv2.approxPolyDP(contour, 0.02 * cv2.arcLength(contour, True), True)
-        if len(approx) > maxVertices:
-            continue
-        obstacle = Obstacle(i)
-        pixelPts = []
-        # convert each vertex to zone coordinates in mm
-        for pt in approx:
-            px, py = pt[0]
-            pixelPts.append([px, py])
-            # convert to zone coordinates then scale by zone dimensions
-            zonePt = worldToZone(pixelToWorld((px, py)), {'corners': zoneWorldCorners})
-            if zonePt and -0.1 <= zonePt[0] <= 1.1 and -0.1 <= zonePt[1] <= 1.1:
-                # convert to zone coordinates in mm (BL corner = 0,0)
-                obstacle.addVertex(zonePt[0] * bottomLen, zonePt[1] * leftLen)
-        # only keep obstacles with at least 3 vertices
-        if len(obstacle.getVertices()) >= 3:
-            obstacles.append(obstacle)
-            # draw obstacle on canvas
-            pts = np.array(pixelPts, dtype=np.int32).reshape((-1, 1, 2))
-            cv2.polylines(canvas, [pts], True, (255, 0, 255), 2, cv2.LINE_AA)
-            # add semi-transparent fill
-            overlay = canvas.copy()
-            cv2.fillPoly(overlay, [pts], (255, 0, 255))
-            cv2.addWeighted(overlay, 0.2, canvas, 0.8, 0, canvas)
-    return canvas, obstacles, (bottomLen, leftLen)
+def resetStability():
+    global is_stable, stable_screenshot, stability_buffer
+    is_stable = False
+    stable_screenshot = None
+    stability_buffer.clear()
 
-def createCanvasAndState(frame, robotId=8, goalId=9, edgeParams={'low': 25, 'high': 80, 'blur': 3}):
-    '''
-    main vision pipeline, returns canvas with overlays and state dict with coordinates in mm
-    '''
-    # detect edges for obstacle detection
-    edges = detectEdges(frame, **edgeParams)
-    # unique key for smoothing this robot/goal pair
-    smoothKey = f"r{robotId}_g{goalId}"
-    # create white canvas and draw edges in black
-    canvas = np.full_like(frame, 255)
-    canvas[edges > 0] = (0, 0, 0)
-    # detect ArUco markers
-    _, centers, cornersMap, _ = detectAruco(frame, draw=False)
-    # build operating zone from corner markers
-    zone = buildOperatingZone(centers)
-    # draw zone boundary on canvas
-    canvas = drawOperatingZone(canvas, zone)
+def calculateScale(cornersMap, marker_size_mm=100.0):
+    """calculate pixels per mm using all available aruco marker edges.
+    
+    Args:
+        cornersMap: Dictionary of marker_id -> corner points
+        marker_size_mm: Physical size of markers in mm (default 100mm)
+    
+    Returns:
+        pixels_per_mm: Scale factor for pixel to mm conversion
+    """
+    if not cornersMap:
+        return 1.0
+    
+    edge_lengths = []
+    
+    # collect all edge lengths from all detected markers
+    for marker_id, corners in cornersMap.items():
+        if corners is not None and len(corners) == 4:
+            for i in range(4):
+                # calculate edge length in pixels
+                p1 = corners[i]
+                p2 = corners[(i + 1) % 4]
+                edge_length_px = np.linalg.norm(p2 - p1)
+                edge_lengths.append(edge_length_px)
+    
+    if not edge_lengths:
+        return 1.0
+    
+    # use median instead of mean for better robustness against outliers
+    avg_edge_length_px = np.median(edge_lengths)
+    
+    # calculate pixels per mm: known physical size / measured pixel size
+    pixels_per_mm = avg_edge_length_px / marker_size_mm
+    
+    return pixels_per_mm
+
+def pixelToWorld(pixel, pixelsPerMm, frameHeight):
+    return (pixel[0] / pixelsPerMm, (frameHeight - pixel[1]) / pixelsPerMm)
+
+def checkStability(state):
+    global stability_buffer
+    
+    if not (state.get('robot') and state.get('goal') and state.get('robotTheta') is not None):
+        stability_buffer.clear()
+        return False
+    
+    current = {'robot': state['robot'], 'goal': state['goal'], 'robotTheta': state['robotTheta']}
+    
+    if stability_buffer:
+        last = stability_buffer[-1]
+        robot_diff = np.linalg.norm(np.array(current['robot']) - np.array(last['robot']))
+        goal_diff = np.linalg.norm(np.array(current['goal']) - np.array(last['goal']))
+        angle_diff = abs(current['robotTheta'] - last['robotTheta'])
+        
+        if robot_diff > STABILITY_THRESHOLD or goal_diff > STABILITY_THRESHOLD or angle_diff > 5.0:
+            stability_buffer.clear()
+    
+    stability_buffer.append(current)
+    return len(stability_buffer) == STABILITY_FRAMES
+
+def createCanvasAndState(frame):
+    global stable_screenshot, is_stable
+    
+    if is_stable and stable_screenshot is not None:
+        return stable_screenshot, {}
+    
+    canvas = frame.copy()
     frameH, frameW = frame.shape[:2]
-    # calibrate scale from robot's 50mm orientation line
-    pixelsPerMm = max(frameW, frameH) / 200.0  # fallback
-    if cornersMap and robotId in cornersMap:
-        arr = cornersMap[robotId].astype(float)
-        # compute marker center
-        cx, cy = arr[:, 0].mean(), arr[:, 1].mean()
-        # get top edge midpoint
-        topMid = (arr[0] + arr[1]) / 2
-        # measure distance from center to top edge (should be 25mm)
-        lineLen = np.hypot(topMid[0] - cx, topMid[1] - cy)
-        if lineLen > 0:
-            pixelsPerMm = lineLen / 50.0  # 50mm = full marker height
-    # conversion function: pixel coords to world coords in mm with bottom-left origin
-    pixelToWorld = lambda pt: (pt[0] / pixelsPerMm, (frameH - 1 - pt[1]) / pixelsPerMm)
-    # convert zone corners to world coordinates first
-    zoneWorldCorners = None
-    zoneDims = (0, 0)
+    
+    ids, centers, cornersMap, annotated = detectAruco(frame)
+    zone = buildOperatingZone(centers)
+    pixelsPerMm = calculateScale(cornersMap)
+    
+    # only draw zone when all 4 corners found
+    if zone.get('isComplete'):
+        canvas = drawOperatingZone(canvas, zone)
+    
+    # calculate coordinates with bottom-left (ID 3) as origin (0,0)
     zoneCornersMm = None
-    if zone and zone.get('corners'):
-        zoneWorldCorners = [pixelToWorld(c) for c in zone['corners']]
-        # calculate zone dimensions in mm
-        tl, tr, br, bl = zoneWorldCorners
-        bottomLen = np.linalg.norm(np.array(br) - np.array(bl))  # BR to BL
-        leftLen = np.linalg.norm(np.array(tl) - np.array(bl))  # TL to BL
-        zoneDims = (bottomLen, leftLen)
-        # create zone coordinate system with BL as (0,0)
-        # corners in zone coordinates: BL(0,0), BR(width,0), TR(width,height), TL(0,height)
-        zoneCornersMm = [(0, 0), (bottomLen, 0), (bottomLen, leftLen), (0, leftLen)]
-    # detect obstacles using world coordinates for detection but zone coordinates for output
-    canvas, obstacles, _ = detectAndDrawObstacles(canvas, edges, pixelToWorld, zoneWorldCorners)
-    # draw robot and goal markers
-    canvas = drawRobotGoal(canvas, cornersMap if cornersMap else centers, robotId, goalId)
-
-    # process goal position
-    goalZone = None
-    if goalId in centers and zoneWorldCorners and zoneDims[0] > 0:
-        # convert goal to zone coordinates then scale to mm
-        gz = worldToZone(pixelToWorld(centers[goalId]), {'corners': zoneWorldCorners})
-        if gz:
-            goalZone = (gz[0] * zoneDims[0], gz[1] * zoneDims[1])
-    # process robot position and orientation
-    robotZone = None
-    robotThetaZone = None
-    rCx, rCy, _ = robotWorldPose(centers, cornersMap, robotId)
-    if rCx and zoneWorldCorners and cornersMap and robotId in cornersMap:
-        # convert robot center to world coordinates
-        robotWorld = pixelToWorld((rCx, rCy))
-        arr = cornersMap[robotId].astype(float)
-        # get top edge midpoint in world coordinates
-        topMid = (arr[0] + arr[1]) / 2
-        topMidWorld = pixelToWorld(topMid)
-        # compute robot orientation in world frame
-        robotThetaWorld = np.arctan2(topMidWorld[1] - robotWorld[1], topMidWorld[0] - robotWorld[0])
-        # convert robot position to zone coordinates
-        rz = worldToZone(robotWorld, {'corners': zoneWorldCorners})
-        if rz and zoneDims[0] > 0:
-            robotZone = (rz[0] * zoneDims[0], rz[1] * zoneDims[1])
-            # theta relative to zone bottom edge (0° = right along bottom edge)
-            tl, tr, br, bl = zoneWorldCorners
-            edgeAngle = np.arctan2(br[1] - bl[1], br[0] - bl[0])
-            robotThetaZone = np.degrees(robotThetaWorld - edgeAngle)
-            robotThetaZone = ((robotThetaZone + 180) % 360) - 180  # normalize to [-180, 180]
-    # build state dictionary with smoothed coordinates
-    state = {'zoneCorners': zoneCornersMm, 'goal': smoothTuple(smoothKey, 'goal', goalZone),
-             'robot': smoothTuple(smoothKey, 'robot', robotZone),
-             'robotTheta': smoothAngle(smoothKey, 'robotTheta', robotThetaZone),
-             'obstacles': obstacles}
-
-    # draw status text on canvas
+    
+    if 3 in centers and zone.get('isComplete'):
+        # zone corners relative to bottom-left (ID 3) which becomes (0,0)
+        bl_px = centers[3]  # bottom-left marker position in pixels
+        corners_px = zone['corners']  # [bl, br, tr, tl] in pixel coordinates
+        
+        zoneCornersMm = []
+        for corner_px in corners_px:
+            # calculate relative position from bottom-left corner
+            rel_x = (corner_px[0] - bl_px[0]) / pixelsPerMm
+            rel_y = (bl_px[1] - corner_px[1]) / pixelsPerMm  # flip Y: bottom-left is (0,0)
+            zoneCornersMm.append((rel_x, rel_y))
+    
+    # draw coordinate axes when origin found
+    if 3 in centers:
+        origin_px = centers[3]
+        axis_length = 100
+        
+        x_end = (int(origin_px[0] + axis_length), int(origin_px[1]))
+        y_end = (int(origin_px[0]), int(origin_px[1] - axis_length))
+        
+        cv2.arrowedLine(canvas, (int(origin_px[0]), int(origin_px[1])), x_end, (0, 0, 255), 3)
+        cv2.arrowedLine(canvas, (int(origin_px[0]), int(origin_px[1])), y_end, (0, 255, 0), 3)
+        cv2.putText(canvas, "X", (x_end[0] + 5, x_end[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.putText(canvas, "Y", (y_end[0] - 15, y_end[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.circle(canvas, (int(origin_px[0]), int(origin_px[1])), 8, (255, 255, 255), -1)
+    
+    # calculate positions relative to bottom-left origin (0,0)
+    goalZone = robotZone = robotThetaZone = None
+    
+    if goalId in centers and 3 in centers:
+        bl_px = centers[3]
+        goal_px = centers[goalId]
+        goalZone = ((goal_px[0] - bl_px[0]) / pixelsPerMm, (bl_px[1] - goal_px[1]) / pixelsPerMm)
+    
+    rCx, rCy, robotTheta = robotWorldPose(centers, cornersMap, robotId)
+    if rCx is not None and rCy is not None and 3 in centers:
+        bl_px = centers[3]
+        robotZone = ((float(rCx) - bl_px[0]) / pixelsPerMm, (bl_px[1] - float(rCy)) / pixelsPerMm)
+        if robotTheta is not None:
+            robotThetaZone = np.degrees(robotTheta)
+            if robotThetaZone < 0:
+                robotThetaZone += 360
+    
+    state = {
+        'zoneCorners': zoneCornersMm,
+        'goal': goalZone,
+        'robot': robotZone,
+        'robotTheta': robotThetaZone,
+        'obstacles': []
+    }
+    
+    # draw markers
+    if robotId in centers:
+        robot_center = (int(centers[robotId][0]), int(centers[robotId][1]))
+        cv2.circle(canvas, robot_center, 8, (255, 0, 0), -1)
+        cv2.putText(canvas, "ROBOT", (robot_center[0] + 15, robot_center[1] - 15), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+        
+        # draw robot orientation line
+        if robotId in cornersMap:
+            corners = cornersMap[robotId]
+            top_mid = ((corners[0] + corners[1]) / 2).astype(int)
+            cv2.arrowedLine(canvas, robot_center, tuple(top_mid), (255, 150, 150), 3)
+    
+    if goalId in centers:
+        goal_center = (int(centers[goalId][0]), int(centers[goalId][1]))
+        cv2.circle(canvas, goal_center, 8, (0, 255, 0), -1)
+        cv2.putText(canvas, "GOAL", (goal_center[0] + 15, goal_center[1] - 15), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    
+    # handle stability
     lines = []
-    if state['zoneCorners']:
-        bl, br, tr, tl = state['zoneCorners']  # zone coordinates: BL, BR, TR, TL
-        lines.append(f"Zone (mm) - BL:({bl[0]:.1f},{bl[1]:.1f}) BR:({br[0]:.1f},{br[1]:.1f})")
-        lines.append(f"Zone (mm) - TL:({tl[0]:.1f},{tl[1]:.1f}) TR:({tr[0]:.1f},{tr[1]:.1f})")
-        lines.append(f"Zone size: {br[0]:.1f}mm × {tl[1]:.1f}mm")
-    if asXy(state['goal']):
+    if not is_stable:
+        if checkStability(state):
+            is_stable = True
+            # create enhanced screenshot with corner labels
+            stable_screenshot = canvas.copy()
+            
+            # add corner coordinate labels to screenshot
+            if 3 in centers and state['zoneCorners'] and len(state['zoneCorners']) == 4:
+                bl, br, tr, tl = state['zoneCorners']
+                # bottom-left (ID 3) is origin, others are relative to it
+                corner_data = [(3, (0.0, 0.0), "BL"), (2, br, "BR"), (1, tr, "TR"), (0, tl, "TL")]
+                
+                for marker_id, coords, label in corner_data:
+                    if marker_id in centers:
+                        center = centers[marker_id]
+                        text = f"{label} = ({coords[0]:.1f}, {coords[1]:.1f})"
+                        cv2.putText(stable_screenshot, text, (int(center[0]) + 13, int(center[1]) + 25), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3)
+                        cv2.putText(stable_screenshot, text, (int(center[0]) + 13, int(center[1]) + 25), 
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # add robot coordinates and angle
+            if robotZone and robotId in centers:
+                center = centers[robotId]
+                robot_text = f"ROBOT = ({robotZone[0]:.1f}, {robotZone[1]:.1f})"
+                if robotThetaZone is not None:
+                    robot_text += f", {robotThetaZone:.1f}"
+                cv2.putText(stable_screenshot, robot_text, (int(center[0]) + 13, int(center[1]) + 40), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3)
+                cv2.putText(stable_screenshot, robot_text, (int(center[0]) + 13, int(center[1]) + 40), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 200, 200), 2)
+            
+            # add goal coordinates
+            if goalZone and goalId in centers:
+                center = centers[goalId]
+                goal_text = f"GOAL = ({goalZone[0]:.1f}, {goalZone[1]:.1f})"
+                cv2.putText(stable_screenshot, goal_text, (int(center[0]) + 13, int(center[1]) + 40), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3)
+                cv2.putText(stable_screenshot, goal_text, (int(center[0]) + 13, int(center[1]) + 40), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            lines.append("SYSTEM LOCKED - COORDINATES STABLE")
+        else:
+            progress = len(stability_buffer) / STABILITY_FRAMES * 100
+            lines.append(f"CALIBRATING... {progress:.0f}% ({len(stability_buffer)}/{STABILITY_FRAMES} frames)")
+    else:
+        lines.append("SYSTEM LOCKED - COORDINATES STABLE")
+        lines.append("Press 'R' to recalibrate")
+    
+    # add status
+    robot_status = "FOUND" if robotId in centers else "NOT FOUND"
+    goal_status = "FOUND" if goalId in centers else "NOT FOUND"
+    
+    lines.extend([
+        f"Robot ID {robotId}: {robot_status}",
+        f"Goal ID {goalId}: {goal_status}"
+    ])
+    
+    if state['zoneCorners'] and len(state['zoneCorners']) == 4:
+        bl, br, tr, tl = state['zoneCorners']
+        lines.extend([
+            f"Zone (mm) - BL:({bl[0]:.1f},{bl[1]:.1f}) BR:({br[0]:.1f},{br[1]:.1f})",
+            f"Zone (mm) - TL:({tl[0]:.1f},{tl[1]:.1f}) TR:({tr[0]:.1f},{tr[1]:.1f})"
+        ])
+    
+    if state['goal']:
         gx, gy = state['goal']
-        lines.append(f"Goal: x={gx:.1f}mm y={gy:.1f}mm (zone coords)")
-    if asXy(state['robot']):
+        lines.append(f"Goal: x={gx:.1f}mm y={gy:.1f}mm")
+    
+    if state['robot']:
         rx, ry = state['robot']
         theta = f"{state['robotTheta']:.1f}" if state['robotTheta'] is not None else "n/a"
-        lines.append(f"Robot: x={rx:.1f}mm y={ry:.1f}mm angle={theta} (degrees) (zone coords)")
-    # draw text with black outline and white fill
+        lines.append(f"Robot: x={rx:.1f}mm y={ry:.1f}mm angle={theta}")
+    
+    # draw text
     for i, txt in enumerate(reversed(lines)):
-        y = canvas.shape[0] - 8 - (i * 20)
-        cv2.putText(canvas, txt, (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4, cv2.LINE_AA)
-        cv2.putText(canvas, txt, (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+        y = canvas.shape[0] - 20 - (i * 25)
+        cv2.putText(canvas, txt, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3)
+        cv2.putText(canvas, txt, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    
     return canvas, state
+
+def getOperatingState(state):
+    output = {'zoneCorners': state.get('zoneCorners'), 'obstacles': [], 'goal': None, 'robot': None}
+    
+    if state.get('goal'):
+        output['goal'] = {'x': state['goal'][0], 'y': state['goal'][1]}
+        
+    if state.get('robot') and state.get('robotTheta') is not None:
+        output['robot'] = {'x': state['robot'][0], 'y': state['robot'][1], 'theta': state['robotTheta']}
+        
+    return output
