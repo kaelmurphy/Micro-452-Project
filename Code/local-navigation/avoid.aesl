@@ -28,7 +28,8 @@ var prox_delayed[50]
 var state = 0
 
 # Flags
-var halt_flag = 0
+var segment = -1
+var avoided_flag = 0
 
 sub odometry
 
@@ -66,7 +67,8 @@ sub detect_path_collision
 
     # Check if vector collide with first vertex tolerances
     if x_r_1 > {X_MIN_1} and x_r_1 < {X_MAX_1} and y_r_1 > {Y_MIN_1} and y_r_1 < {Y_MAX_1} then
-        callsub halt
+        segment = 1
+        callsub collision_detected
         return
     end
 
@@ -82,16 +84,18 @@ sub detect_path_collision
 
     # Check if vector collide with first vertex tolerances
     if x_r_2 > {X_MIN_2} and x_r_2 < {X_MAX_2} and y_r_2 > {Y_MIN_2} and y_r_2 < {Y_MAX_2} then
-        callsub halt
+        segment = 2
+        callsub collision_detected
         return
     end
 
-sub halt
+sub collision_detected
+    
     motor.left.target = 0
     motor.right.target = 0
 	timer.period[0] = 2000
-	halt_flag = 1
-	emit done
+	avoided_flag = 1
+	emit avoided [x_mm, y_mm, theta, segment]
 
 onevent motor
 
@@ -101,7 +105,7 @@ onevent motor
     callsub odometry
 
     # Early return if halt flag already set
-	if halt_flag == 1 then
+	if avoided_flag == 1 then
 		return
 	end
 
@@ -110,7 +114,7 @@ onevent motor
 onevent prox
 
     # Early return if halt flag already set
-	if halt_flag == 1 then
+	if avoided_flag == 1 then
 		return
 	end
 
@@ -198,6 +202,6 @@ onevent prox
 onevent timer0
 
 	# Resend event if missed by the application
-	if halt_flag == 1 then
-		emit done
+	if avoided_flag == 1 then
+		emit avoided [x_mm, y_mm, theta, segment]
 	end

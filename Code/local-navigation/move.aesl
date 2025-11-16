@@ -57,15 +57,18 @@ sub left_pos_reg
 		return
 	end
 
-	# P controller
+	# Linear P controller
 	if l_i < 40 then
 		l_speed = (1 + l_i) * 10
 		l_i++
-	elseif l_e_mm < 40 then
+	elseif l_e_mm >= 40 then
 		l_speed = 400
 	else
 		l_speed = (1 + l_e_mm) * 10
 	end
+
+	# Differential P controller
+	call math.muldiv(l_speed, l_speed, 20 + (r_p_mm - l_p_mm), 20)
   	
   	# Apply target speed
 	motor.left.target = {LEFT_DIRECTION} l_speed
@@ -98,7 +101,7 @@ sub right_pos_reg
 		return
 	end
 
-	# P controller
+	# Linear P controller
 	if r_i < 40 then
 		r_speed = (1 + r_i) * 10
 		r_i++
@@ -107,6 +110,9 @@ sub right_pos_reg
 	else
 		r_speed = (1 + r_e_mm) * 10
 	end
+
+	# Differential P controller
+	call math.muldiv(r_speed, r_speed, 20 + (l_p_mm - r_p_mm), 20)
   	
   	# Apply target speed
 	motor.right.target = {RIGHT_DIRECTION} r_speed
@@ -144,7 +150,7 @@ onevent prox
 			motor.right.target = 0
 			timer.period[0] = 2000
 			obstacle_flag = 1
-			emit obstacle
+			emit obstacle [(l_p_mm + r_p_mm) >> 1]
 			return
 		end
 	end
@@ -155,5 +161,5 @@ onevent timer0
 	if done_flag == 1 then
 		emit done
 	elseif obstacle_flag == 1 then
-		emit obstacle
+		emit obstacle [(l_p_mm + r_p_mm) >> 1]
 	end

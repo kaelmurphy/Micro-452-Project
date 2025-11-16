@@ -42,30 +42,44 @@ class Thymio():
     def __init__(self, calibration: Calibration) -> None:
         
         # Robot calibration
-        self.calibration = calibration
+        self._calibration = calibration
 
         # Robot pose
         self._x = 0
         self._y = 0
         self._theta = 0
 
-        # Program executor
-        self.programPath = None
-        self.programSource = None
-        self.event = None
-        self.segment = 0
+        # Event handler
+        self._event = None
+        self._data = None
 
         # Thymio client
-        self.client = ClientAsync()
+        self._client = ClientAsync()
+        self._node: ClientAsyncNode = None
 
     # Context manager
     def __enter__(self) -> 'Thymio':
-        self.client.__enter__()
-        self.client.add_event_received_listener(self.on_event_received) # TODO lock and unlock node here
+
+        # Initialize client
+        self._client.__enter__()
+        self._client.add_event_received_listener(self.on_event_received)
+        
+        # Connect to node
+        self._node = aw(self._client.lock())
+        error = aw(self._node.register_events([
+            ('done', 0),
+            ('obstacle', 1),
+            ('avoided', 4)
+        ]))
+        if error is not None:
+            raise RuntimeError(f'Event registration error: {error}')
+        aw(self._node.watch(events=True))
         return self
 
     def __exit__(self, type, value, traceback) -> None:
-        self.client.__exit__(type, value, traceback)
+        aw(self._node.stop())
+        aw(self._node.unlock())
+        self._client.__exit__(type, value, traceback)
 
     # Pose getters and setters
     @property
@@ -87,146 +101,126 @@ class Thymio():
     @property
     def theta(self) -> float:
         return self._theta
-        # return np.pi * float(self._theta) / 32767
 
     @theta.setter
     def theta(self, value) -> int:
         self._theta = value
-        # return int(np.round(32767 * ((value + np.pi) % (2 * np.pi) - np.pi) / np.pi))
 
     # Event handler
     def on_event_received(self, node, event_name, event_data):
 
-        # Capture only one event
-        if self.event is None:
-            self.event = event_name
+        # Capture only one event per program
+        if self._event is None:
+            self._event = event_name
+            self._data = event_data
         else:
             return
 
-        # Save estimated pose
-        if self.event == 'avoided':
-            self._x = event_data[0]
-            self._y = event_data[1]
-            self._theta = event_data[2]
-
-    # Program executor
-    async def execute(self):
-
-        node: ClientAsyncNode
-        with await self.client.lock() as node:
-
-            # Register events
-            self.event = None
-            error = await node.register_events([
-                ('done', 0),
-                ('obstacle', 0)
-            ])
-            if error is not None:
-                raise RuntimeError(f'Event registration error: {error}')
-            
-            # Compile program
-            error = await node.compile(self.programSource)
-            if error is not None:
-                raise RuntimeError(f'Compilation error: {self.programPath} at line {error['error_line']}:{error['error_col']} {error['error_msg']}')
-            
-            # Start program
-            await node.watch(events=True)
-            error = await node.run()
-            if error is not None:
-                raise RuntimeError(f'Error {error['error_code']}')
-            
-            # Wait until program is done
-            while self.event is None:
-                await self.client.sleep(Thymio.EVENTS_POLLING_PERIOD)
-
-    def run_program(self, path: str, **kwargs) -> str:
+    def run(self, program: str, **kwargs) -> tuple[str, list[int]]:
 
         # Load program
-        self.programPath = path
-        with open(path) as file:
-            source = file.read()
-            self.programPath = path
-            self.programSource = source.format(**kwargs)
+        with open(program) as file:
+            source = file.read().format(**kwargs)
+        
+        # Compile program
+        error = aw(self._node.compile(source))
+        if error is not None:
+            raise RuntimeError(f'Compilation error: {program} at line {error['error_line']}:{error['error_col']} {error['error_msg']}')
         
         # Run program
-        self.client.run_async_program(self.execute)
-        return self.event
+        self._event = None
+        self._data = None
+        error = aw(self._node.run())
+        if error is not None:
+            raise RuntimeError(f'Error {error['error_code']}')
+        
+        # Wait for an event
+        while self._event is None:
+            aw(self._client.sleep(Thymio.EVENTS_POLLING_PERIOD))
+        aw(self._node.stop())
+        return self._event, self._data
 
     # Programs
-    def astolfi(self, x: int, y: int) -> str:
-        print(f'Moving to ({x}, {y})')
-        return self.run_program(
-            'legacy/astolfi2.aesl',
-
-            # Initial position
-            X_MM = self._x,
-            Y_MM = self._y,
-            THETA = self._theta,
-
-            # Calibration
-            SCALE = int(np.round(10000 * self.calibration.scale)),
-            TRACK = int(np.round(10 * 2**15 / (np.pi * self.calibration.track))),
-
-            # Target
-            TARGET_X_MM = x,
-            TARGET_Y_MM = y
-        )
-    
-    def forward(self, millimeters: int) -> str:
+    def forward(self, millimeters: int) -> tuple[str, list[int]]:
         print(f'Moving {millimeters} millimeters')
-        return self.run_program(
+        return self.run(
             'move.aesl',
-            SCALE           = int(self.calibration.scale * 10000),
+            SCALE           = int(self._calibration.scale * 10000),
             TARGET          = millimeters,
             LEFT_DIRECTION  = '',
             RIGHT_DIRECTION = ''
         )
 
-    def turn(self, radians: float) -> str:
+    def turn(self, radians: float) -> tuple[str, list[int]]:
         print(f'Turning {radians:.3f} radians')
-        return self.run_program(
+        return self.run(
             'move.aesl',
-            SCALE           = int(self.calibration.scale * 10000),
-            TARGET          = int(np.abs(radians * self.calibration.track / 2)),
+            SCALE           = int(self._calibration.scale * 10000),
+            TARGET          = int(np.abs(radians * self._calibration.track / 2)),
             LEFT_DIRECTION  = '' if np.sign(radians) < 0 else '-',
             RIGHT_DIRECTION = '-' if np.sign(radians) < 0 else ''
         )
 
-    def move(self, x: int, y: int) -> str:
-        print(f'Moving to ({x}, {y})')
+    def move(self, position: np.ndarray) -> str:
+        print(f'Moving to ({position[0]}, {position[1]})')
 
         # Compute motion vector and direction
         wrap = lambda radians: (radians + np.pi) % (2 * np.pi) - np.pi
-        vector = np.array([x - self.x, y - self.y])
+        vector = np.array([position[0] - self.x, position[1] - self.y])
         direction = np.angle(complex(vector[0], vector[1]))
 
         # Turn
         radians = wrap(direction - self.theta)
-        self.turn(radians)
+        event, data = self.turn(radians)
+        match event:
+
+            case 'done':
+                self.theta = wrap(self.theta + radians)
+
+            case 'obstacle':
+                radians = np.sign(radians) * data[0] * 2 / self._calibration.track
+                self.theta = wrap(self.theta + radians)
+                return 'obstacle'
 
         # Advance
         millimeters = int(np.linalg.norm(vector))
-        result = self.forward(millimeters)
+        event, data = self.forward(millimeters)
+        match event:
 
-        # Update pose
-        self.x = x
-        self.y = y
-        self.theta = wrap(self.theta + radians)
-        return result
+            case 'done':
+                self.x = position[0]
+                self.y = position[1]
 
-    def avoid(self) -> str:
+            case 'obstacle':
+                self.x += (data[0] / millimeters) * (position[0] - self.x)
+                self.y += (data[0] / millimeters) * (position[1] - self.y)
+                return 'obstacle'
+            
+        # Target reached
+        return 'done'
+
+    def avoid(self, path: np.ndarray) -> int:
         print(f'Avoiding obstacle')
-        return self.run_program(
+
+        # Angles fixed point conversion
+        to_q15 = lambda radians: int(np.round(32767 * ((radians + np.pi) % (2 * np.pi) - np.pi) / np.pi))
+        to_radians = lambda q15: np.pi * float(q15) / 32767
+
+        # Compute path collision box
+
+
+        # Avoid obstacle
+        event, data = self.run(
             'avoid.aesl',
 
             # Initial position
-            X_MM    = self._x,
-            Y_MM    = self._y,
-            THETA   = self._theta,
+            X_MM    = self.x,
+            Y_MM    = self.y,
+            THETA   = to_q15(self.theta),
 
             # Calibration
-            SCALE   = int(np.round(10000 * self.calibration.scale)),
-            TRACK   = int(np.round(10 * 2**15 / (np.pi * self.calibration.track))),
+            SCALE   = int(np.round(10000 * self._calibration.scale)),
+            TRACK   = int(np.round(10 * 2**15 / (np.pi * self._calibration.track))),
 
             # Collider geometry
             C_1     = 0,
@@ -242,3 +236,10 @@ class Thymio():
             Y_MIN_2 = 0,
             Y_MAX_2 = 0
         )
+        
+        # Update current position
+        assert event == 'avoided'
+        self.x = data[0]
+        self.y = data[1]
+        self.theta = to_radians(data[2])
+        return data[3]
