@@ -206,35 +206,45 @@ class Thymio():
         to_q15 = lambda radians: int(np.round(32767 * ((radians + np.pi) % (2 * np.pi) - np.pi) / np.pi))
         to_radians = lambda q15: np.pi * float(q15) / 32767
 
-        # Compute path collision box
+        # Fixed point trigonometric functions
+        fp_cos = lambda vector: vector[0] / np.linalg.norm(vector)
+        fp_sin = lambda vector: vector[1] / np.linalg.norm(vector)
+        q15_cos = lambda vector: int(np.round(32767 * fp_cos(vector)))
+        q15_sin = lambda vector: int(np.round(32767 * fp_sin(vector)))
 
+        # Point rotation function
+        rotate_x = lambda vector, point: fp_cos(vector) * point[0] + fp_sin(vector) * point[1]
+        rotate_y = lambda vector, point: -fp_sin(vector) * point[0] + fp_cos(vector) * point[1]
+
+        # Compute path vectors
+        vector_1 = path[1] - path[0]
+        vector_2 = path[2] - path[1] if path.shape[0] > 2 else None
 
         # Avoid obstacle
         event, data = self.run(
             'avoid.aesl',
 
             # Initial position
-            X_MM    = self.x,
-            Y_MM    = self.y,
+            X_MM    = int(self.x),
+            Y_MM    = int(self.y),
             THETA   = to_q15(self.theta),
 
             # Calibration
-            SCALE   = int(np.round(10000 * self._calibration.scale)),
-            TRACK   = int(np.round(10 * 2**15 / (np.pi * self._calibration.track))),
+            SCALE   = int(np.round(10415 * self._calibration.scale)),
+            TRACK   = int(np.round(11 * 2**15 / (np.pi * self._calibration.track))),
 
             # Collider geometry
-            C_1     = 0,
-            S_1     = 0,
-            X_MIN_1 = 0,
-            X_MAX_1 = 0,
-            Y_MIN_1 = 0,
-            Y_MAX_1 = 0,
-            C_2     = 0,
-            S_2     = 0,
-            X_MIN_2 = 0,
-            X_MAX_2 = 0,
-            Y_MIN_2 = 0,
-            Y_MAX_2 = 0
+            STATE   = (1 if np.cross(vector_1, vector_2) >= 0 else 0) if vector_2 is not None else 0,
+            C_1     = q15_cos(vector_1),
+            S_1     = q15_sin(vector_1),
+            X_11    = int(rotate_x(vector_1, path[0])),
+            X_12    = int(rotate_x(vector_1, path[1])),
+            Y_1     = int(rotate_y(vector_1, path[0])),
+            C_2     = q15_cos(vector_2) if vector_2 is not None else 0,
+            S_2     = q15_sin(vector_2) if vector_2 is not None else 0,
+            X_21    = int(rotate_x(vector_2, path[1])) if vector_2 is not None else 0,
+            X_22    = int(rotate_x(vector_2, path[2])) if vector_2 is not None else 0,
+            Y_2     = int(rotate_y(vector_2, path[1])) if vector_2 is not None else 0
         )
         
         # Update current position

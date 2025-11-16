@@ -19,7 +19,8 @@ def navigate(path: np.ndarray, direction: float, calibration: Calibration) -> No
         thymio.theta = direction
 
         # For each waypoint
-        for i in range(1, path.shape[0]):
+        i = 1
+        while i < path.shape[0]:
 
             # Move toward waypoint
             match thymio.move(path[i]):
@@ -28,34 +29,39 @@ def navigate(path: np.ndarray, direction: float, calibration: Calibration) -> No
                     i += 1
 
                 case 'obstacle':
-                    i += thymio.avoid(path[(i - 1):])
+                    endSegment = thymio.avoid(path[(i - 1):])
+                    i += endSegment - 1
 
             # Do high level filtering and decision making
             print(f'thymio.x: {thymio.x}')
             print(f'thymio.y: {thymio.y}')
             print(f'thymio.theta: {thymio.theta:.3f}')
 
-# Test function
-def eight_test(calibration: Calibration) -> None:
+# Test paths
+eight = []
+for _ in range(4):
+    eight.append([0,   0])
+    eight.append([200, 0])
+    eight.append([200, 200])
+    eight.append([0,   200])
+    eight.append([0,   400])
+    eight.append([200, 400])
+    eight.append([200, 200])
+    eight.append([0,   200])
+    eight.append([0,   0])
 
-    square = []
-    for _ in range(4):
-        square.append([0,   0])
-        square.append([200, 0])
-        square.append([200, 200])
-        square.append([0,   200])
-        square.append([0,   400])
-        square.append([200, 400])
-        square.append([200, 200])
-        square.append([0,   200])
-        square.append([0,   0])
+triangle = []
+for _ in range(4):
+    triangle.append([0,   0])
+    triangle.append([400, 0])
+    triangle.append([200, 200])
 
-    navigate(np.array(square), 0, calibration)
+line = [[0, 0], [600, 0]]
 
 # Run test
 if __name__ == '__main__':
 
     try:
-        eight_test(THYMIO_482_CALIBRATION)
+        navigate(np.array(triangle), 0, THYMIO_482_CALIBRATION)
     except KeyboardInterrupt:
         pass

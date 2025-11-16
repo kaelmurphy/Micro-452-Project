@@ -16,19 +16,30 @@ var y_um = 0
 
 # Collision
 var temp = 0
+var c_2 = {C_2}
+var s_2 = {S_2}
 var x_r_1 = 0
 var y_r_1 = 0
 var x_r_2 = 0
 var y_r_2 = 0
+var x_min = 0
+var x_max = 0
+var y_min = 0
+var y_max = 0
+var x_min_a = 0
+var x_max_a = 0
+var y_min_a = 0
+var y_max_a = 0
+var out_of_tolerances = 0
 
 # Avoidance
 var prox_sum = 0
 var i = 0
 var prox_delayed[50]
-var state = 0
+var state = {STATE}
 
 # Flags
-var segment = -1
+var segment = 0
 var avoided_flag = 0
 
 sub odometry
@@ -53,44 +64,68 @@ sub odometry
     y_um %= 1000
     theta = theta + d_theta
 
-sub detect_path_collision
+sub detect_collision
 
-    # Rotate first vector in the reference frame of the first vertex tolerances
+    # Compute position vector relative to first segment
+    x_r_1 = 0
+    y_r_1 = 0
     call math.muldiv(temp, x_mm, {C_1}, 32767)
     x_r_1 += temp
-    call math.muldiv(temp, y_mm, -{S_1}, 32767)
+    call math.muldiv(temp, y_mm, {S_1}, 32767)
     x_r_1 += temp
     call math.muldiv(temp, x_mm, {S_1}, 32767)
     y_r_1 += temp
-    call math.muldiv(temp, y_mm, {C_1}, 32767)
+    call math.muldiv(temp, -y_mm, {C_1}, 32767)
     y_r_1 += temp
 
-    # Check if vector collide with first vertex tolerances
-    if x_r_1 > {X_MIN_1} and x_r_1 < {X_MAX_1} and y_r_1 > {Y_MIN_1} and y_r_1 < {Y_MAX_1} then
-        segment = 1
-        callsub collision_detected
-        return
-    end
-
-    # Rotate second vector in the reference frame of the second vertex tolerances
+    # Compute position vector relative to second segment
+    x_r_2 = 0
+    y_r_2 = 0
     call math.muldiv(temp, x_mm, {C_2}, 32767)
     x_r_2 += temp
-    call math.muldiv(temp, y_mm, -{S_2}, 32767)
+    call math.muldiv(temp, y_mm, {S_2}, 32767)
     x_r_2 += temp
     call math.muldiv(temp, x_mm, {S_2}, 32767)
     y_r_2 += temp
-    call math.muldiv(temp, y_mm, {C_2}, 32767)
+    call math.muldiv(temp, -y_mm, {C_2}, 32767)
     y_r_2 += temp
 
-    # Check if vector collide with first vertex tolerances
-    if x_r_2 > {X_MIN_2} and x_r_2 < {X_MAX_2} and y_r_2 > {Y_MIN_2} and y_r_2 < {Y_MAX_2} then
-        segment = 2
+    # If second segment is given, check if relative position collide with second segment tolerances
+    if c_2 != 0 and s_2 != 0 then
+        x_min_a = {X_21} - 5
+        x_max_a = {X_22} + 5
+        y_min_a = {Y_2} - 5
+        y_max_a = {Y_2} + 5
+        if out_of_tolerances == 1 and x_min_a <= x_r_2 and x_r_2 <= x_max_a and y_min_a <= y_r_2 and y_r_2 <= y_max_a then
+            segment = 2
+            callsub collision_detected
+            return
+        end
+    end
+
+    # Check if relative position collide with first segment tolerances
+    x_min = {X_11} - 5
+    x_max = {X_12} + 5
+    y_min = {Y_1} - 5
+    y_max = {Y_1} + 5
+    if out_of_tolerances == 1 and x_min <= x_r_1 and x_r_1 <= x_max and y_min <= y_r_1 and y_r_1 <= y_max then
+        segment = 1
         callsub collision_detected
-        return
+    end
+
+    # Check if relative position exit first segment tolerances
+    x_min = {X_11} - 10
+    x_max = {X_12} + 10
+    y_min = {Y_1} - 10
+    y_max = {Y_1} + 10
+    if out_of_tolerances == 0 and (x_r_1 <= x_min or x_max <= x_r_1 or y_r_1 <= y_min or y_max <= y_r_1) then
+        leds.top = [0, 0, 32]
+        out_of_tolerances = 1
     end
 
 sub collision_detected
-    
+
+    leds.top = [0, 32, 0]
     motor.left.target = 0
     motor.right.target = 0
 	timer.period[0] = 2000
@@ -109,7 +144,7 @@ onevent motor
 		return
 	end
 
-    callsub detect_path_collision
+    callsub detect_collision
 
 onevent prox
 
