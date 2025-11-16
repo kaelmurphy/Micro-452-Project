@@ -7,7 +7,8 @@ from thymio import Thymio, Calibration
 import numpy as np
 
 # Robots calibrations
-THYMIO_482_CALIBRATION = Calibration(3.1254, 95.000)
+# THYMIO_482_CALIBRATION = Calibration(3.1254, 95.000)
+THYMIO_482_CALIBRATION = Calibration(3.255, 97.000)
 
 # Tests functions
 def forward_test(calibration: Calibration) -> None:

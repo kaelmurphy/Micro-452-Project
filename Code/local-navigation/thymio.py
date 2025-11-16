@@ -91,6 +91,7 @@ class Thymio():
             source = file.read()
             self.programPath = path
             self.programSource = source.format(**kwargs)
+            print(self.programSource)
         
         # Run program
         self.client.run_async_program(self.execute)
@@ -129,4 +130,27 @@ class Thymio():
             TARGET          = int(np.abs(radians * self.calibration.pitch / 2)),
             LEFT_DIRECTION  = '' if np.sign(radians) < 0 else '-',
             RIGHT_DIRECTION = '-' if np.sign(radians) < 0 else ''
+        )
+
+    def astolfi(self, x: int, y: int, theta: float) -> None:
+        print(f'Going to coordinate ({x}, {y}) mm with angle {theta} radians')
+        theta = (theta + np.pi) % (2 * np.pi) - np.pi
+        self.run_program(
+            'astolfi.aesl',
+
+            # Initial position
+            X_MM = 0,
+            X_UM = 0,
+            Y_MM = 0,
+            Y_UM = 0,
+            THETA = 0,
+
+            # Calibration
+            SCALE = int(np.round(10000 * self.calibration.scale)),
+            PITCH = int(np.round(10 * 2**15 / (np.pi * self.calibration.pitch))),
+
+            # Target
+            TARGET_X_MM = x,
+            TARGET_Y_MM = y,
+            TARGET_THETA = int(np.round(2**15 * theta / np.pi))
         )

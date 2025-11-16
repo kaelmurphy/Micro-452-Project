@@ -56,4 +56,8 @@ def navigate_eight(calibration: Calibration) -> None:
 # Run test
 if __name__ == '__main__':
 
-    navigate_eight(THYMIO_482_CALIBRATION)
+    # navigate_eight(THYMIO_482_CALIBRATION)
+
+    with Thymio(THYMIO_482_CALIBRATION) as thymio:
+
+        thymio.astolfi(0, 0, np.pi / 2)
