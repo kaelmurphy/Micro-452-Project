@@ -8,6 +8,7 @@ import numpy as np
 
 # Robots calibrations
 THYMIO_482_CALIBRATION = Calibration(3.1254, 95.000)
+# THYMIO_482_CALIBRATION = Calibration(3.255, 97.000)
 
 # Tests functions
 def forward_test(calibration: Calibration) -> None:
@@ -27,4 +28,4 @@ def turn_test(calibration: Calibration) -> None:
 # Run test
 if __name__ == '__main__':
 
-    forward_test(THYMIO_482_CALIBRATION)
+    turn_test(THYMIO_482_CALIBRATION)

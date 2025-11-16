@@ -8,52 +8,60 @@ from calibration import THYMIO_482_CALIBRATION
 import numpy as np
 
 # Navigation routine
-def navigate(path: np.ndarray, calibration: Calibration) -> None:
-
-    # Helper function to wrap angles between -PI and PI
-    wrap = lambda radians: (radians + np.pi) % (2 * np.pi) - np.pi
+def navigate(path: np.ndarray, direction: float, calibration: Calibration) -> None:
 
     # Connect to thymio
     with Thymio(calibration) as thymio:
 
+        # Set initial pose
+        thymio.x = path[0][0]
+        thymio.y = path[0][1]
+        thymio.theta = direction
+
         # For each waypoint
-        currentDirection = 0
-        for i in range(path.shape[0] - 1):
+        i = 1
+        while i < path.shape[0]:
 
-            # Compute motion vector and direction
-            waypointVector = path[i + 1] - path[i]
-            waypointDirection = np.angle(complex(waypointVector[0], waypointVector[1]))
+            # Move toward waypoint
+            match thymio.move(path[i]):
 
-            # Turn toward waypoint
-            radians = wrap(waypointDirection - currentDirection)
-            thymio.turn(radians)
-            currentDirection = wrap(currentDirection + radians)
+                case 'done':
+                    i += 1
 
-            # Move to waypoint
-            millimeters = int(np.linalg.norm(waypointVector))
-            thymio.forward(millimeters)
+                case 'obstacle':
+                    endSegment = thymio.avoid(path[(i - 1):])
+                    i += endSegment - 1
 
-            # Next waypoint
-            i += 1
+            # Do high level filtering and decision making
+            print(f'thymio.x: {thymio.x}')
+            print(f'thymio.y: {thymio.y}')
+            print(f'thymio.theta: {thymio.theta:.3f}')
 
-# Test function
-def navigate_eight(calibration: Calibration) -> None:
+# Test paths
+eight = []
+for _ in range(4):
+    eight.append([0,   0])
+    eight.append([200, 0])
+    eight.append([200, 200])
+    eight.append([0,   200])
+    eight.append([0,   400])
+    eight.append([200, 400])
+    eight.append([200, 200])
+    eight.append([0,   200])
+    eight.append([0,   0])
 
-    square = []
-    for _ in range(4):
-        square.append([0,   0])
-        square.append([200, 0])
-        square.append([200, 200])
-        square.append([0,   200])
-        square.append([0,   400])
-        square.append([200, 400])
-        square.append([200, 200])
-        square.append([0,   200])
-        square.append([0,   0])
+triangle = []
+for _ in range(4):
+    triangle.append([0,   0])
+    triangle.append([400, 0])
+    triangle.append([200, 200])
 
-    navigate(np.array(square), calibration)
+line = [[0, 0], [600, 0]]
 
 # Run test
 if __name__ == '__main__':
 
-    navigate_eight(THYMIO_482_CALIBRATION)
+    try:
+        navigate(np.array(triangle), 0, THYMIO_482_CALIBRATION)
+    except KeyboardInterrupt:
+        pass

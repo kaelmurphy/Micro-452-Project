@@ -1,0 +1,124 @@
+# Pose
+var x_mm = {X_MM}
+var x_um = {X_UM}
+var y_mm = {Y_MM}
+var y_um = {Y_UM}
+var theta = {THETA}
+
+# Odometry
+var d_s_um = 0
+var x_l_um = 0
+var x_r_um = 0
+var d_theta = 0
+var theta_half = 0
+var cos_half = 0
+var sin_half = 0
+var d_x_um = 0
+var d_y_um = 0
+
+# Error
+var e_x_mm = 0
+var e_y_mm = 0
+var e_theta = 0
+var rho_mm = 0
+
+# Astolfi
+var alpha = 0
+var beta = 0
+var v = 0
+var omega_alpha = 0
+var omega_beta = 0
+var omega = 0
+
+# P controller
+var v_p = 0
+var omega_p = 0
+
+# Control ouputs
+var mot_l = 0
+var mot_r = 0
+
+onevent motor
+
+	# ===================================== #
+	#            Pose estimation            #
+	# ===================================== #
+
+    # Compute wheel increment
+    call math.muldiv(x_l_um, motor.left.speed,  {SCALE}, 10000)
+    call math.muldiv(x_r_um, motor.right.speed, {SCALE}, 10000)
+
+    # Compute linear and angular increments
+    d_s_um = (x_l_um + x_r_um) >> 1
+	call math.muldiv(d_theta, x_r_um - x_l_um, {PITCH}, 10000)
+
+    # Find mean heading
+    theta_half = theta + (d_theta >> 1)
+    theta = theta + d_theta
+
+    # Compute x and y change
+    call math.cos(cos_half, theta_half)
+    call math.sin(sin_half, theta_half)
+    call math.muldiv(d_x_um, d_s_um, cos_half, 32767)
+    call math.muldiv(d_y_um, d_s_um, sin_half, 32767)
+
+    # Accumulate coarse / fine x and y
+    x_um += d_x_um
+    x_mm += x_um / 1000
+    x_um %= 1000
+    y_um += d_y_um
+    y_mm += y_um / 1000
+    y_um %= 1000
+
+    # ===================================== #
+    #          Astolfi controller           #
+    # ===================================== #
+
+	# Compute carthesian error
+	e_x_mm = {TARGET_X_MM} - x_mm
+	e_y_mm = {TARGET_Y_MM} - y_mm
+	e_theta = {TARGET_THETA} - theta
+
+	# Compute polar error, clamp to avoid L2 norm overflow
+    call math.clamp(e_x_mm, e_x_mm, -127, 127)
+    call math.clamp(e_y_mm, e_y_mm, -127, 127)
+    call math.sqrt(rho_mm, (e_x_mm * e_x_mm) + (e_y_mm * e_y_mm))
+    call math.atan2(alpha, e_y_mm, e_x_mm)
+    alpha -= theta
+    beta = e_theta - alpha
+    
+    # Compute control outputs
+    call math.muldiv(v, rho_mm, 4, 1)
+    call math.muldiv(omega_alpha, alpha, 1, 40)
+    call math.muldiv(omega_beta, beta, -1, 60)
+    omega = omega_alpha + omega_beta
+    
+    # ===================================== #
+    #           P controller                #
+    # ===================================== #
+    
+    if rho_mm < 10 then
+    	call math.muldiv(omega, e_theta, 1, 20)
+    	# call math.muldiv(v, rho_mm, 20, 1)
+        v = 0
+    end
+
+    # Clamp control inputs
+    call math.clamp(v, v, -400, 400)
+    call math.clamp(omega, omega, -400, 400)
+
+    # Compute and clamp command
+    mot_l = v - omega
+    mot_r = v + omega
+    call math.clamp(mot_l, mot_l, -400, 400)
+    call math.clamp(mot_r, mot_r, -400, 400)
+
+    # Apply commands
+    if rho_mm >= 10 or abs e_theta >= 50 then
+        motor.left.target  = mot_l
+        motor.right.target = mot_r
+    else
+        motor.left.target  = 0
+        motor.right.target = 0
+        emit done
+    end
