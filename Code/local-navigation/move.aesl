@@ -1,139 +1,312 @@
-# Wheels position increment
-var d_l_um = 0
-var d_r_um = 0
+# Constants
+var ERR_CUTOFF = 30    	# stop when |error| <= 30
 
-# Wheels position tracking
-var l_p_um = 0
-var l_p_mm = 0
-var r_p_um = 0
-var r_p_mm = 0
+var ERR_RAMP   = 12000  # start ramp-down region
+var DIV_GAIN   = 30     # divisor for slope
 
-# Wheels position error
-var l_e_um = 0
-var l_e_mm = 0
-var r_e_um = 0
-var r_e_mm = 0
+var POS_RAMP   = 11100  # end of ramp-up region (by position)
+var MIN_SPEED  = 30     # minimum moving speed
+
+var COAST_SPD  = 400    # full-speed cruise
+var INV_K_DIFF = 25000	# Inverse differential correction
+
+# 32 bit signed positions
+var x_l_hi = 0
+var x_l_lo = 0
+var x_r_hi = 0
+var x_r_lo = 0
+
+# 32 bit absolute positions
+var x_abs_l_hi = 0
+var x_abs_l_lo = 0
+var x_abs_r_hi = 0
+var x_abs_r_lo = 0
+
+# 32 bit errors
+var e_l_hi = 0
+var e_l_lo = 0
+var e_r_hi = 0
+var e_r_lo = 0
+var e_diff = 0
+
+# 16 bit clamped positions
+var x_l = 0
+var x_r = 0
+
+# 16 bit clamped errors
+var e_l = 0
+var e_r = 0
 
 # Speeds
-var l_i = 0
-var r_i = 0
-var l_speed = 0
-var r_speed = 0
+var s_l = 0
+var s_r = 0
 
 # Wheel regulation done flags
-var l_done = 0
-var r_done = 0
+var done_l = 0
+var done_r = 0
 
 # Flags
 var i = 0
 var done_flag = 0
 var obstacle_flag = 0
 
-sub left_pos_reg
+# 32 bit arithmetic
+var a_hi = 0
+var a_lo = 0
+var b_hi = 0
+var b_lo = 0
+var r_hi = 0
+var r_lo = 0
+var tmp = 0
+var ua = 0
+var ub = 0
+var us = 0
+var ulo = 0
+
+# (r_hi, r_lo) = int32(a_lo)
+sub cast16to32
+    r_lo = a_lo
+    if a_lo < 0 then
+        r_hi = -1
+    else
+        r_hi = 0
+    end
+
+# (r_hi, r_lo) = (a_hi, a_lo) + (b_hi, b_lo)
+sub add32
+    tmp = a_lo
+    r_lo = a_lo + b_lo
+    us = r_lo + 0x8000
+    ua = tmp + 0x8000
+    if us < ua then # > carry
+        r_hi = a_hi + b_hi + 1
+    else
+        r_hi = a_hi + b_hi
+    end
+
+# (r_hi, r_lo) = (a_hi, a_lo) - (b_hi, b_lo)
+sub sub32
+    tmp = a_lo
+    r_lo = a_lo - b_lo
+    ua = tmp + 0x8000
+    ub = b_lo + 0x8000
+    if ua < ub then # > borrow
+        r_hi = a_hi - b_hi - 1
+    else
+        r_hi = a_hi - b_hi
+    end
+
+# (r_hi, r_lo) = abs(a_hi, a_lo)
+sub abs32
+    if a_hi < 0 then
+        b_hi = a_hi
+        b_lo = a_lo
+        a_hi = 0
+        a_lo = 0
+        callsub sub32
+    else
+        r_hi = a_hi
+        r_lo = a_lo
+    end
+
+# r_lo = clamp(a_hi, a_lo)
+sub clamp32to16
+    if a_hi == 0 then
+        ulo = a_lo + 0x8000
+        if ulo > (0x7FFF + 0x8000) then
+            r_lo = 32767
+        else
+            r_lo = a_lo
+        end
+        return
+    end
+    if a_hi == -1 then
+        ulo = a_lo + 0x8000
+        if ulo < (0x8000 + 0x8000) then
+            r_lo = -32768
+        else
+            r_lo = a_lo
+        end
+        return
+    end
+    if a_hi > 0 then
+        r_lo = 32767
+    else
+        r_lo = -32768
+    end
+
+# Controller
+sub control
 
 	# Early return if done
-	if l_done == 1 then
+	if done_l == 1 then
 		return
 	end
 
-	# Update position estimate
-	l_p_um += abs d_l_um
-	l_p_mm += l_p_um / 1000
-	l_p_um %= 1000
+	# Accumulate left position
+	a_lo = motor.left.speed
+	callsub cast16to32
+	a_hi = r_hi
+	a_lo = r_lo
+	b_hi = x_l_hi
+	b_lo = x_l_lo
+	callsub add32
+	x_l_hi = r_hi
+	x_l_lo = r_lo
 
-	# Compute position error
-  	l_e_mm = {TARGET} - l_p_mm
-	if l_p_um == 0 then
-		l_e_um = 0
-	else
-		l_e_mm--
-		l_e_um = 1000 - l_p_um
-	end
+	# Accumulate right position
+	a_lo = motor.right.speed
+	callsub cast16to32
+	a_hi = r_hi
+	a_lo = r_lo
+	b_hi = x_r_hi
+	b_lo = x_r_lo
+	callsub add32
+	x_r_hi = r_hi
+	x_r_lo = r_lo
 
-	# Stop if within tolerance
-	if l_e_mm < 0 or (l_e_mm == 0 and l_e_um <= 100) then
-		motor.left.target = 0
-		l_done = 1
-		return
-	end
+	# Compute left error
+	a_hi = {TARGET_L_HI}
+	a_lo = {TARGET_L_LO}
+	b_hi = x_l_hi
+	b_lo = x_l_lo
+	callsub sub32
+	e_l_hi = r_hi
+	e_l_lo = r_lo
 
-	# Linear P controller
-	if l_i < 40 then
-		l_speed = (1 + l_i) * 10
-		l_i++
-	elseif l_e_mm >= 40 then
-		l_speed = 400
-	else
-		l_speed = (1 + l_e_mm) * 10
-	end
+	# Compute right error
+	a_hi = {TARGET_R_HI}
+	a_lo = {TARGET_R_LO}
+	b_hi = x_r_hi
+	b_lo = x_r_lo
+	callsub sub32
+	e_r_hi = r_hi
+	e_r_lo = r_lo
+	
+	# Clamp left position
+	a_hi = x_l_hi
+	a_lo = x_l_lo
+	callsub clamp32to16
+	x_l = r_lo
+
+	# Clamp right position
+	a_hi = x_r_hi
+	a_lo = x_r_lo
+	callsub clamp32to16
+	x_r = r_lo
+
+	# Clamp left error
+	a_hi = e_l_hi
+	a_lo = e_l_lo
+	callsub clamp32to16
+	e_l = r_lo
+
+	# Clamp right error
+	a_hi = e_r_hi
+	a_lo = e_r_lo
+	callsub clamp32to16
+	e_r = r_lo
+	
+	# Left wheel speed profile
+    if abs e_l <= ERR_CUTOFF then
+        motor.left.target = 0
+        done_l = 1
+    else
+
+        # Ramp down
+        if abs e_l <= ERR_RAMP then
+            s_l = (abs e_l / DIV_GAIN) + MIN_SPEED
+
+        # Ramp up
+        elseif abs x_l <= POS_RAMP then
+            s_l = (abs x_l / DIV_GAIN) + MIN_SPEED
+
+        # Cruise
+        else
+            s_l = COAST_SPD
+        end
+
+		# Motion direction
+        if e_l >= 0 then
+            s_l *= 1
+        else
+            s_l *= -1
+        end
+    end
+
+
+    # Right wheel speed profile
+    if abs e_r <= ERR_CUTOFF then
+        motor.right.target = 0
+        done_r = 1
+    else
+
+        # Ramp down
+        if abs e_r <= ERR_RAMP then
+            s_r = (abs e_r / DIV_GAIN) + MIN_SPEED
+
+        # Ramp up
+        elseif abs x_r <= POS_RAMP then
+            s_r = (abs x_r / DIV_GAIN) + MIN_SPEED
+
+        # Cruise
+        else
+            s_r = COAST_SPD
+        end
+
+        # Motion direction
+        if e_r >= 0 then
+            s_r *= 1
+        else
+            s_r *= -1
+        end
+    end
+
+	# Compute left absolute position
+	a_hi = x_l_hi
+	a_lo = x_l_lo
+	callsub abs32
+	x_abs_l_hi = r_hi
+	x_abs_l_lo = r_lo
+
+	# Compute right absolute position
+	a_hi = x_r_hi
+	a_lo = x_r_lo
+	callsub abs32
+	x_abs_r_hi = r_hi
+	x_abs_r_lo = r_lo
+
+	# Compute differential error
+	a_hi = x_abs_r_hi
+	a_lo = x_abs_r_lo
+	b_hi = x_abs_l_hi
+	b_lo = x_abs_l_lo
+	callsub sub32
+	a_hi = r_hi
+	a_lo = r_lo
+	callsub clamp32to16
+	e_diff = r_lo
 
 	# Differential P controller
-	call math.muldiv(l_speed, l_speed, 20 + (r_p_mm - l_p_mm), 20)
+	call math.muldiv(s_l, s_l, INV_K_DIFF + e_diff, INV_K_DIFF)
+	call math.muldiv(s_r, s_r, INV_K_DIFF - e_diff, INV_K_DIFF)
   	
   	# Apply target speed
-	motor.left.target = {LEFT_DIRECTION} l_speed
-
-sub right_pos_reg
-
-	# Early return if done
-	if r_done == 1 then
-		return
-	end
-
-	# Update position estimate
-	r_p_um += abs d_r_um
-	r_p_mm += r_p_um / 1000
-	r_p_um %= 1000
-
-	# Compute position error
-  	r_e_mm = {TARGET} - r_p_mm
-	if r_p_um == 0 then
-		r_e_um = 0
-	else
-		r_e_mm--
-		r_e_um = 1000 - r_p_um
-	end
-
-	# Stop if within tolerance
-	if r_e_mm < 0 or (r_e_mm == 0 and r_e_um <= 100) then
-		motor.right.target = 0
-		r_done = 1
-		return
-	end
-
-	# Linear P controller
-	if r_i < 40 then
-		r_speed = (1 + r_i) * 10
-		r_i++
-	elseif r_e_mm >= 40 then
-		r_speed = 400
-	else
-		r_speed = (1 + r_e_mm) * 10
-	end
-
-	# Differential P controller
-	call math.muldiv(r_speed, r_speed, 20 + (l_p_mm - r_p_mm), 20)
-  	
-  	# Apply target speed
-	motor.right.target = {RIGHT_DIRECTION} r_speed
+	motor.left.target = s_l
+	motor.right.target = s_r
 
 onevent motor
 
-	# Compute wheel increment
-    call math.muldiv(d_l_um, motor.left.speed,  {SCALE}, 10000)
-    call math.muldiv(d_r_um, motor.right.speed, {SCALE}, 10000)
-
-	# Early return if halt flag already set
+	# Early return if done flag already set
 	if done_flag == 1 then
 		return
 	end
 
 	# Call position regulation for both wheels
-	callsub left_pos_reg
-	callsub right_pos_reg
+	callsub control
 
-	# Detect when both raise their 'done' flag
-	if l_done == 1 and r_done == 1 then
+	# Detect when both P controllers are done
+	if done_l == 1 and done_r == 1 then
 		leds.top = [0, 32, 0]
 		motor.left.target = 0
 		motor.right.target = 0
@@ -145,6 +318,7 @@ onevent motor
 
 onevent prox
 
+	# Obstacle detection
 	for i in 1:4 do
 		if prox.horizontal[i] > 2000 then
 			leds.top = [32, 0, 0]
@@ -152,7 +326,7 @@ onevent prox
 			motor.right.target = 0
 			timer.period[0] = 2000
 			obstacle_flag = 1
-			emit obstacle [(l_p_mm + r_p_mm) >> 1]
+			emit obstacle 1
 			return
 		end
 	end
@@ -163,5 +337,5 @@ onevent timer0
 	if done_flag == 1 then
 		emit done
 	elseif obstacle_flag == 1 then
-		emit obstacle [(l_p_mm + r_p_mm) >> 1]
+		emit obstacle 1
 	end

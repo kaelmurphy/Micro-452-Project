@@ -14,7 +14,7 @@ class Calibration():
 
     Two values must be calibrated:
 
-        - scale : Coder scale (um/lsb)
+        - scale : Steps per mm (um/lsb)
 
         - track : Wheel track (mm)
     """
@@ -139,26 +139,50 @@ class Thymio():
             aw(self._client.sleep(Thymio.EVENTS_POLLING_PERIOD))
         aw(self._node.stop())
         return self._event, self._data
+    
+    # Conversions
+    def split_int32(x: int) -> tuple[int, int]:
+            x &= 0xFFFFFFFF
+            lo = x & 0xFFFF
+            if lo >= 0x8000:
+                lo -= 0x10000
+            hi = (x >> 16) & 0xFFFF
+            if hi >= 0x8000:
+                hi -= 0x10000
+            return hi, lo
+        
+    def combine_int32(hi: int, lo: int) -> int:
+        hi &= 0xFFFF
+        lo &= 0xFFFF
+        x = (hi << 16) | lo
+        if x >= 0x80000000:
+            x -= 0x100000000
+        return x
 
     # Programs
-    def forward(self, millimeters: int) -> tuple[str, list[int]]:
+    def straight(self, millimeters: float) -> tuple[str, list[int]]:
         print(f'Moving {millimeters} millimeters')
+        steps = int(np.round(millimeters * self._calibration.scale))
+        hi, lo = Thymio.split_int32(steps)
         return self.run(
             'move.aesl',
-            SCALE           = int(self._calibration.scale * 10000),
-            TARGET          = millimeters,
-            LEFT_DIRECTION  = '',
-            RIGHT_DIRECTION = ''
+            TARGET_L_HI = hi,
+            TARGET_L_LO = lo,
+            TARGET_R_HI = hi,
+            TARGET_R_LO = lo
         )
 
     def turn(self, radians: float) -> tuple[str, list[int]]:
         print(f'Turning {radians:.3f} radians')
+        steps = int(np.round(radians * self._calibration.track * self._calibration.scale / 2))
+        l_hi, l_lo = Thymio.split_int32(-steps)
+        r_hi, r_lo = Thymio.split_int32(steps)
         return self.run(
             'move.aesl',
-            SCALE           = int(self._calibration.scale * 10000),
-            TARGET          = int(np.abs(radians * self._calibration.track / 2)),
-            LEFT_DIRECTION  = '' if np.sign(radians) < 0 else '-',
-            RIGHT_DIRECTION = '-' if np.sign(radians) < 0 else ''
+            TARGET_L_HI = l_hi,
+            TARGET_L_LO = l_lo,
+            TARGET_R_HI = r_hi,
+            TARGET_R_LO = r_lo
         )
 
     def move(self, position: np.ndarray) -> str:

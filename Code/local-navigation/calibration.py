@@ -7,16 +7,15 @@ from thymio import Thymio, Calibration
 import numpy as np
 
 # Robots calibrations
-THYMIO_482_CALIBRATION = Calibration(3.1254, 95.000)
-# THYMIO_482_CALIBRATION = Calibration(3.255, 97.000)
+THYMIO_482_CALIBRATION = Calibration(312.54, 95.000)
 
 # Tests functions
-def forward_test(calibration: Calibration) -> None:
+def straight_test(calibration: Calibration) -> None:
     
     with Thymio(calibration) as thymio:
         for _ in range(10):
-            thymio.forward(100)
-            thymio.backward(100)
+            thymio.straight(100)
+            thymio.straight(-100)
 
 def turn_test(calibration: Calibration) -> None:
 
