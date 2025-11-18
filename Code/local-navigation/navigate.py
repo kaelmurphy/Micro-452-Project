@@ -62,6 +62,6 @@ line = [[0, 0], [600, 0]]
 if __name__ == '__main__':
 
     try:
-        navigate(np.array(triangle), 0, THYMIO_482_CALIBRATION)
+        navigate(np.array(eight), 0, THYMIO_482_CALIBRATION)
     except KeyboardInterrupt:
         pass

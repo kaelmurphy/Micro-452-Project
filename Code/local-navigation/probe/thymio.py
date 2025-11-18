@@ -222,7 +222,7 @@ class Thymio():
 
         # Avoid obstacle
         event, data = self.run(
-            'avoid.aesl',
+            'probe.aesl',
 
             # Initial position
             X_MM    = int(self.x),

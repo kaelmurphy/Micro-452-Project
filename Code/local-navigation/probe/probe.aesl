@@ -1,0 +1,135 @@
+# Wheels position increment
+var d_l_um = 0
+var d_r_um = 0
+
+# Wheels position tracking
+var l_p_um = 0
+var l_p_mm = 0
+var r_p_um = 0
+var r_p_mm = 0
+
+# Speeds
+var l_i = 0
+var r_i = 0
+var l_speed = 0
+var r_speed = 0
+
+# Proximity
+var prox_sum = 0
+
+# Flags
+var i = 0
+var found_flag = 0
+var clear_flag = 0
+
+sub left_pos_reg
+
+	# Update position estimate
+	l_p_um += d_l_um
+	if l_p_um >= 500 then
+		l_p_um -= 500
+		l_p_mm++
+	elseif l_p_um <= -500 then
+		l_p_um += 500
+		l_p_mm--
+	end
+
+	# Linear P controller
+	if found_flag == 0 and prox_sum < 8000 then
+		l_speed = (1 + ((8000 - prox_sum) / 200)) * 10
+	elseif found_flag == 1 and prox_sum < 8000 then
+		l_speed = (1 + (prox_sum / 200)) * 10
+	elseif l_i < 40 then
+		l_speed = (1 + l_i) * 10
+		l_i++
+	else
+		l_speed = 400
+	end
+
+sub right_pos_reg
+
+	# Update position estimate
+	r_p_um += d_r_um
+	if r_p_um >= 500 then
+		r_p_um -= 500
+		r_p_mm++
+	elseif r_p_um =< -500 then
+		r_p_um += 500
+		r_p_mm--
+	end
+
+	# Linear P controller
+	if found_flag == 0 and prox_sum < 8000 then
+		r_speed = (1 + ((8000 - prox_sum) / 400)) * 10
+	elseif found_flag == 1 and prox_sum < 8000 then
+		r_speed = (1 + (prox_sum / 400)) * 10
+	elseif r_i < 40 then
+		r_speed = (1 + r_i) * 10
+		r_i++
+	else
+		r_speed = 400
+	end
+
+onevent motor
+
+	# Compute wheel increment
+    call math.muldiv(d_l_um, motor.left.speed,  {SCALE}, 10000)
+    call math.muldiv(d_r_um, motor.right.speed, {SCALE}, 10000)
+
+	# Early return if clear flag already set
+	if clear_flag == 1 then
+		return
+	end
+
+	# Call position regulation for both wheels
+	callsub left_pos_reg
+	callsub right_pos_reg
+
+	# Differential P controller
+	call math.muldiv(l_speed, l_speed, 20 + r_p_mm + l_p_mm, 20)
+	call math.muldiv(r_speed, r_speed, 20 + l_p_mm + r_p_mm, 20)
+  	
+	# Invert motion until object if found
+	if found_flag == 0 then
+		l_speed *= -1
+		r_speed *= -1
+	end
+
+  	# Apply target speed
+	motor.left.target = {LEFT_DIRECTION} l_speed
+	motor.right.target = {RIGHT_DIRECTION} r_speed
+
+onevent prox
+
+	# Early return if clear flag already set
+	if clear_flag == 1 then
+		return
+	end
+
+	# Compute sum of proximity sensors
+	prox_sum = 0
+	for i in 1:4 do
+		prox_sum += prox.horizontal[i]
+	end
+
+	# Set found flag when something is detected
+	if found_flag == 0 and prox_sum > 4000 then
+		found_flag = 1
+		leds.top = [0, 0, 32]
+	end
+
+	# Stop if zero
+	if found_flag == 1 and prox_sum == 0 then
+		leds.top = [32, 0, 0]
+		motor.left.target = 0
+		motor.right.target = 0
+		timer.period[0] = 2000
+		clear_flag = 1
+	end
+
+onevent timer0
+
+	# Resend event if missed by the application
+	if clear_flag == 1 then
+		emit clear [(abs l_p_mm + abs r_p_mm) >> 1]
+	end
