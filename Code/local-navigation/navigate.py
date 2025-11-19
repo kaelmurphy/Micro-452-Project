@@ -56,7 +56,10 @@ for _ in range(4):
     triangle.append([400, 0])
     triangle.append([200, 200])
 
-line = [[0, 0], [600, 0]]
+line = [
+    [0, 0],
+    [600, 0]
+]
 
 # Run test
 if __name__ == '__main__':
