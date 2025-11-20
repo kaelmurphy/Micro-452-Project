@@ -48,9 +48,10 @@ def createCleanCanvas(frame, clean_canvas):
     from draw_utils import drawOperatingZone
     from coord_utils import robotWorldPose
     from obstacle import detectObstacles, drawObstacles
+    from feed_processing import calculateScale, ROBOT_ID, GOAL_ID, ORIGIN_ID
     
-    robotId = 8
-    goalId = 9
+    robotId = ROBOT_ID
+    goalId = GOAL_ID
     
     # Detect ArUco markers
     ids, centers, cornersMap, annotated = detectAruco(frame)
@@ -65,14 +66,13 @@ def createCleanCanvas(frame, clean_canvas):
         cv2.polylines(clean_canvas, [pts], True, (0, 255, 255), 3)  # Yellow border
         
         # Detect and draw obstacles
-        obstacles = detectObstacles(frame, zone)
-        if obstacles:
-            for obstacle in obstacles:
-                contour = np.array(obstacle.contour, dtype=np.int32)
-                # Fill with red
-                cv2.fillPoly(clean_canvas, [contour], (0, 0, 200))
-                # Dark red outline
-                cv2.polylines(clean_canvas, [contour], True, (0, 0, 100), 2)
+        if ORIGIN_ID in centers:
+            obstacles = detectObstacles(frame, zone)
+            if obstacles:
+                pixelsPerMm = calculateScale(cornersMap)
+                origin = centers[ORIGIN_ID]
+                clean_canvas = drawObstacles(clean_canvas, obstacles, pixelsPerMm, origin, 
+                                           showCoordinates=False, showVertexNumbers=False)
     
     # Draw robot
     if robotId in centers:
@@ -94,17 +94,17 @@ def createCleanCanvas(frame, clean_canvas):
         cv2.putText(clean_canvas, "GOAL", (goal_center[0] + 20, goal_center[1] - 20), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
     
-    # Draw coordinate axes if origin (ID 3) is detected
-    if 3 in centers:
-        origin_px = centers[3]
-        axis_length = 100
-        x_end = (int(origin_px[0] + axis_length), int(origin_px[1]))
-        y_end = (int(origin_px[0]), int(origin_px[1] - axis_length))
-        cv2.arrowedLine(clean_canvas, (int(origin_px[0]), int(origin_px[1])), x_end, (0, 0, 255), 3)
-        cv2.arrowedLine(clean_canvas, (int(origin_px[0]), int(origin_px[1])), y_end, (0, 255, 0), 3)
-        cv2.putText(clean_canvas, "X", (x_end[0] + 5, x_end[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        cv2.putText(clean_canvas, "Y", (y_end[0] - 15, y_end[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-        cv2.circle(clean_canvas, (int(origin_px[0]), int(origin_px[1])), 8, (0, 0, 0), -1)  # Black origin point
+    # Draw coordinate axes if origin is detected
+    if ORIGIN_ID in centers:
+        originPx = centers[ORIGIN_ID]
+        axisLength = 100
+        xEnd = (int(originPx[0] + axisLength), int(originPx[1]))
+        yEnd = (int(originPx[0]), int(originPx[1] - axisLength))
+        cv2.arrowedLine(clean_canvas, (int(originPx[0]), int(originPx[1])), xEnd, (0, 0, 255), 3)
+        cv2.arrowedLine(clean_canvas, (int(originPx[0]), int(originPx[1])), yEnd, (0, 255, 0), 3)
+        cv2.putText(clean_canvas, "X", (xEnd[0] + 5, xEnd[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.putText(clean_canvas, "Y", (yEnd[0] - 15, yEnd[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.circle(clean_canvas, (int(originPx[0]), int(originPx[1])), 8, (0, 0, 0), -1)  # Black origin point
     
     return clean_canvas, {}
 
