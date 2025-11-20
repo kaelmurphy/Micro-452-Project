@@ -79,7 +79,7 @@ def createCanvasAndState(frame):
     # detect obstacles
     obstacles = []
     if 3 in centers and zone.get('isComplete'):
-        obstacles = detectObstacles(frame, zone, pixelsPerMm, centers[3], centers, cornersMap)
+        obstacles = detectObstacles(frame, zone)
     
     # draw zone and obstacles
     if zone.get('isComplete'):

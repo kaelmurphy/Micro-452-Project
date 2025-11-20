@@ -15,6 +15,8 @@ class CameraStream:
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera at index {self.index}.")
         
+        # Disable any auto-preview windows
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.cap.set(cv2.CAP_PROP_FPS, fps)
