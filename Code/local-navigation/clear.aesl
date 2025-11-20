@@ -1,0 +1,188 @@
+# Direction
+var dir_l = {DIR_L}
+var dir_r = {DIR_R}
+
+# 32 bit positions
+var x_l_hi = 0
+var x_l_lo = 0
+var x_r_hi = 0
+var x_r_lo = 0
+
+# 32 bit errors
+var e_l_hi = 0
+var e_l_lo = 0
+var e_r_hi = 0
+var e_r_lo = 0
+
+# 16 bit clamped errors
+var e_l = 0
+var e_r = 0
+
+# 16 bit speeds
+var v_l = 0
+var v_r = 0
+
+# 16 bit arithmetic
+var r0 = 0
+var r1 = 0
+var r2 = 0
+
+# 32 bit arithmetic
+var r0_hi = 0
+var r0_lo = 0
+var r1_hi = 0
+var r1_lo = 0
+var r2_hi = 0
+var r2_lo = 0
+
+# Flags
+var l_start = 0
+var r_start = 0
+var cleared_flag = 0
+
+# Proximity
+var i = 0
+var prox_sum = 4000
+
+# Periodic events
+timer.period[0] = 500
+
+# (r0_hi, r0_lo) = int32(r0)
+sub cast16to32
+
+    r0_lo = r0
+    if r0 < 0 then
+        r0_hi = 0xFFFF
+    else
+        r0_hi = 0
+    end
+
+# (r0_hi, r0_lo) = (r1_hi, r1_lo) + (r2_hi, r2_lo)
+sub add32
+
+    r0 = r1_lo
+    r0_lo = r1_lo + r2_lo
+    r1 = r0_lo + 0x8000
+    r2 = r0 + 0x8000
+    if r1 < r2 then
+        r0_hi = r1_hi + r2_hi + 0x0001
+    else
+        r0_hi = r1_hi + r2_hi
+    end
+
+# (r0_hi, r0_lo) = (r1_hi, r1_lo) - (r2_hi, r2_lo)
+sub sub32
+
+    r0 = r1_lo
+    r0_lo = r1_lo - r2_lo
+    r1 = r0 + 0x8000
+    r2 = r2_lo + 0x8000
+    if r1 < r2 then
+        r0_hi = r1_hi - r2_hi + 0xFFFF
+    else
+        r0_hi = r1_hi - r2_hi
+    end
+
+# r0 = int16(r0_hi, r0_lo)
+sub cast32to16
+
+    if r0_hi == 0 then
+        if r0_lo < 0 then
+            r0 = 0x7FFF
+        else
+            r0 = r0_lo
+        end
+    elseif r0_hi == 0xFFFF then
+        if r0_lo >= 0 then
+            r0 = 0x8000
+        else
+            r0 = r0_lo
+        end
+    elseif r0_hi > 0 then
+        r0 = 0x7FFF
+    else
+        r0 = 0x8000
+    end
+
+onevent motor
+
+	# Early return if position reached
+	if cleared_flag == 1 then
+		return
+	end
+	
+	# Accumulate left position
+	r0 = abs motor.left.speed
+	callsub cast16to32
+	r1_hi = r0_hi
+	r1_lo = r0_lo
+	r2_hi = x_l_hi
+	r2_lo = x_l_lo
+	callsub add32
+	x_l_hi = r0_hi
+	x_l_lo = r0_lo
+	
+	# Left speed profile
+	if l_start < 40 then
+		v_l = (1 + l_start) * 10
+		l_start++
+	else
+		v_l = 400
+	end
+
+	# Accumulate right position
+	r0 = abs motor.right.speed
+	callsub cast16to32
+	r1_hi = r0_hi
+	r1_lo = r0_lo
+	r2_hi = x_r_hi
+	r2_lo = x_r_lo
+	callsub add32
+	x_r_hi = r0_hi
+	x_r_lo = r0_lo
+
+	# Right speed profile
+	if r_start < 40 then
+		v_r = (1 + r_start) * 10
+		r_start++
+	else
+		v_r = 400
+	end
+	
+	# Slow stop near clearance
+	call math.muldiv(v_l, v_l, prox_sum, 4000)
+	call math.muldiv(v_r, v_r, prox_sum, 4000)
+
+	# Motor output
+	motor.left.target = dir_l * v_l
+	motor.right.target = dir_r * v_r
+
+onevent prox
+
+	# Sum up all proximity sensors
+	prox_sum = 0
+	for i in 0:4 do
+		prox_sum += prox.horizontal[i]
+	end
+
+	# Ceil sum
+	if prox_sum > 4000 then
+		prox_sum = 4000
+	end
+
+	# Detect obstacle
+	if prox_sum == 0 then
+		leds.top = [0, 32, 0]
+		cleared_flag = 1
+		motor.left.target = 0
+		motor.right.target = 0
+	end
+
+
+onevent timer0
+
+	if cleared_flag == 1 then
+		emit cleared [x_l_hi, x_l_lo, x_r_hi, x_r_lo]
+	else
+		emit position [x_l_hi, x_l_lo, x_r_hi, x_r_lo]
+	end
