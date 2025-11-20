@@ -21,13 +21,18 @@ class Obstacle:
         Lazy load vertices from contour with counter-clockwise ordering.
         """
         if self._vertices is None:
-            rawVertices = [(point[0][0], point[0][1]) for point in self.contour]
+            # Handle different contour formats from OpenCV
+            if len(self.contour.shape) == 3:  # Shape: (n_points, 1, 2)
+                rawVertices = [(int(point[0][0]), int(point[0][1])) for point in self.contour]
+            else:  # Shape: (n_points, 2)
+                rawVertices = [(int(point[0]), int(point[1])) for point in self.contour]
             self._vertices, _ = _ensureCounterClockwise(rawVertices)
         return self._vertices
     
     def getVerticesWorldCoords(self, pixelsPerMm, origin):
         """
         Convert pixel coordinates to world coordinates with caching.
+        World coordinate system: origin at ArUco marker ID 3, X+ right, Y+ up
         """
         # Check if we can use cached result
         if (self._worldVertices is not None and 
@@ -36,10 +41,26 @@ class Obstacle:
             return self._worldVertices
         
         # Calculate and cache new world coordinates
-        self._worldVertices = [
-            ((xPixel - origin[0]) / pixelsPerMm, (origin[1] - yPixel) / pixelsPerMm)
-            for xPixel, yPixel in self.vertices
-        ]
+        # World coordinate system: origin at ArUco marker ID 3
+        # X+ rightward (positive X = right of origin)
+        # Y+ upward (positive Y = above origin)
+        self._worldVertices = []
+        for i, (xPixel, yPixel) in enumerate(self.vertices):
+            # SAME FORMULA AS ROBOT AND GOAL:
+            # X: rightward from origin (right = positive)
+            worldX = (float(xPixel) - float(origin[0])) / pixelsPerMm
+            # Y: upward from origin (up = positive, flip pixel Y)
+            worldY = (float(origin[1]) - float(yPixel)) / pixelsPerMm
+            self._worldVertices.append((worldX, worldY))
+            
+            # Debug coordinate conversion - compare with robot/goal formula
+            if len(self._worldVertices) <= 2:
+                direction_x = "RIGHT" if xPixel > origin[0] else "LEFT"
+                direction_y = "ABOVE" if yPixel < origin[1] else "BELOW"
+                print(f"OBSTACLE V{i}: Px({xPixel:.1f},{yPixel:.1f}) [{direction_x},{direction_y}] -> World({worldX:.2f},{worldY:.2f})")
+                print(f"    Formula: X = ({xPixel:.1f} - {origin[0]:.1f}) / {pixelsPerMm:.3f} = {worldX:.2f}")
+                print(f"    Formula: Y = ({origin[1]:.1f} - {yPixel:.1f}) / {pixelsPerMm:.3f} = {worldY:.2f}")
+        
         self._lastPixelsPerMm = pixelsPerMm
         self._lastOrigin = origin
         return self._worldVertices
@@ -51,7 +72,7 @@ class Obstacle:
             'vertices': self.vertices
         }
 
-def detectObstacles(frame, zone, minArea=500, maxArea=50000, colorRange=None):
+def detectObstacles(frame, zone, minArea=300, maxArea=50000, colorRange=None):
     """
     Detect colored obstacles with optimized processing pipeline.
     """
@@ -61,68 +82,93 @@ def detectObstacles(frame, zone, minArea=500, maxArea=50000, colorRange=None):
     if not zone.get('isComplete'):
         return []
     
-    # Use provided color range or default green
+    # Use provided color range or default RGB-based range
     if colorRange is None:
-        lowerGreen = np.array([50, 20, 20])
-        upperGreen = np.array([100, 255, 255])
+        # RGB range (30,75,75) to (45,105,105) - widened slightly
+        # Convert to BGR for OpenCV (Blue, Green, Red)
+        lowerTeal = np.array([70, 70, 25])    # BGR lower bound (widened by 5)
+        upperTeal = np.array([110, 110, 50])  # BGR upper bound (widened by 5)
+        use_rgb = True
     else:
-        lowerGreen, upperGreen = colorRange
+        lowerTeal, upperTeal = colorRange
+        use_rgb = False
     
-    # Optimized HSV conversion and masking
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    binary = cv2.inRange(hsv, lowerGreen, upperGreen)
+    # Use RGB color space instead of HSV for direct RGB filtering
+    if use_rgb:
+        # Work directly in RGB/BGR color space
+        color_frame = frame  # Already in BGR format
+        binary = cv2.inRange(color_frame, lowerTeal, upperTeal)
+    else:
+        # Fallback to HSV if custom range provided
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        binary = cv2.inRange(hsv, lowerTeal, upperTeal)
     
-    # Single morphological operation with larger kernel for efficiency
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    # Pre-create kernel for morphology (reuse)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    # Apply opening to remove noise, then closing to fill gaps
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
     binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
     
     # Find contours with optimized parameters
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
     
-    # Vectorized area calculation and filtering
+    # Vectorized filtering with early exits
     validContours = []
     for contour in contours:
         area = cv2.contourArea(contour)
-        if minArea <= area <= maxArea and len(contour) >= 3:
-            # Optimized polygon approximation
-            epsilon = 0.01 * cv2.arcLength(contour, True)  # Slightly larger epsilon
-            approx = cv2.approxPolyDP(contour, epsilon, True)
-            if len(approx) >= 3:
-                validContours.append(approx)
+        if minArea <= area <= maxArea:
+            contour_len = len(contour)
+            if contour_len >= 3:
+                # Optimized polygon approximation with early area check
+                epsilon = 0.01 * cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, epsilon, True)
+                if len(approx) >= 3:
+                    validContours.append(approx)
     
-    # Temporal smoothing with improved similarity check
+    # Optimized temporal smoothing
     contourHistory.append(validContours)
     if len(contourHistory) > HISTORY_SIZE:
         contourHistory.pop(0)
     
-    # Stability filtering - find contours that appear consistently
+    # Fast stability filtering with balanced tolerance
     if len(contourHistory) >= 2:
         stableContours = []
-        areaTolerance = 0.3
+        areaTolerance = 0.35  # Balanced tolerance
         
-        for current in validContours:
-            currentArea = cv2.contourArea(current)
+        # Pre-compute areas for current frame
+        currentAreas = [cv2.contourArea(c) for c in validContours]
+        
+        for idx, current in enumerate(validContours):
+            currentArea = currentAreas[idx]
             if currentArea == 0:
                 continue
-                
-            # Check if similar contour exists in previous frames
-            isStable = False
-            for prevFrame in contourHistory[:-1]:
-                for prev in prevFrame:
-                    prevArea = cv2.contourArea(prev)
-                    if abs(currentArea - prevArea) / currentArea < areaTolerance:
-                        isStable = True
-                        break
-                if isStable:
-                    break
+            
+            # Fast similarity check against previous frames
+            isStable = any(
+                abs(currentArea - cv2.contourArea(prev)) / currentArea < areaTolerance
+                for prevFrame in contourHistory[:-1]
+                for prev in prevFrame
+                if cv2.contourArea(prev) > 0
+            )
             
             if isStable:
                 stableContours.append(current)
     else:
         stableContours = validContours
     
-    # Create obstacle objects
-    return [Obstacle(contour, cv2.contourArea(contour)) for contour in stableContours]
+    # Create obstacle objects with pre-computed areas
+    obstacles_found = [Obstacle(contour, cv2.contourArea(contour)) for contour in stableContours]
+    
+    # Debug: Print detection parameters when obstacles are found
+    if len(obstacles_found) > 0:
+        if use_rgb:
+            print(f"\\nRGB DETECTION: Range [{lowerTeal[2]},{lowerTeal[1]},{lowerTeal[0]}] to [{upperTeal[2]},{upperTeal[1]},{upperTeal[0]}]")
+        else:
+            print(f"\\nHSV DETECTION: Range [{lowerTeal[0]}-{upperTeal[0]}, {lowerTeal[1]}-{upperTeal[1]}, {lowerTeal[2]}-{upperTeal[2]}]")
+        print(f"Found {len(obstacles_found)} obstacles (min area: {minArea} px)")
+        print("Using direct RGB color filtering")
+    
+    return obstacles_found
 
 def processObstacles(obstacles, pixelsPerMm, origin, printInfo=False, verbose=False):
     """
@@ -136,11 +182,21 @@ def processObstacles(obstacles, pixelsPerMm, origin, printInfo=False, verbose=Fa
     obstacleData = []
     allVertices = []
     
-    # Process all obstacles
+    # Pre-compute origin coordinates for batch processing
+    origin_x, origin_y = origin
+    
+    # Process all obstacles with optimized coordinate conversion
     for i, obstacle in enumerate(obstacles):
         worldVertices = obstacle.getVerticesWorldCoords(pixelsPerMm, origin)
         orderedVertices, wasAlreadyCCW = _ensureCounterClockwise(worldVertices)
-        centroid = _calculateCentroid(orderedVertices)
+        
+        # Fast centroid calculation
+        if orderedVertices:
+            centroid_x = sum(v[0] for v in orderedVertices) / len(orderedVertices)
+            centroid_y = sum(v[1] for v in orderedVertices) / len(orderedVertices)
+            centroid = (centroid_x, centroid_y)
+        else:
+            centroid = (0.0, 0.0)
         
         obstacleInfo = {
             'id': i + 1,
@@ -202,17 +258,28 @@ def drawObstacles(canvas, obstacles, pixelsPerMm, origin, showCoordinates=True, 
     if not obstacles:
         return canvas
     
+    # Pre-compute common values
+    origin_x, origin_y = origin
+    
     for i, obstacle in enumerate(obstacles):
         contour = np.array(obstacle.contour, dtype=np.int32)
         
-        # Efficient polygon rendering
+        # Batch polygon rendering
         cv2.fillPoly(canvas, [contour], (0, 0, 200))
         cv2.polylines(canvas, [contour], True, (0, 0, 100), 2)
+        
+        # Batch centroid calculation for label
+        if len(contour) > 0:
+            center_x = int(np.mean(contour[:, 0, 0]))
+            center_y = int(np.mean(contour[:, 0, 1]))
+            cv2.putText(canvas, f"Obs{i+1}", (center_x-12, center_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2)
         
         # Only show detailed info if requested
         if showCoordinates or showVertexNumbers:
             worldVertices = obstacle.getVerticesWorldCoords(pixelsPerMm, origin)
             
+            # Batch process all vertex annotations
             for j, (point, worldCoord) in enumerate(zip(contour, worldVertices)):
                 x, y = point[0]
                 
@@ -229,12 +296,5 @@ def drawObstacles(canvas, obstacles, pixelsPerMm, origin, showCoordinates=True, 
                     vertexText = f"V{j}"
                     cv2.putText(canvas, vertexText, (x - 12, y + 3), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.25, (255, 255, 255), 1)
-        
-        # Obstacle ID at centroid
-        if len(contour) > 0:
-            centerX = int(np.mean(contour[:, 0, 0]))
-            centerY = int(np.mean(contour[:, 0, 1]))
-            cv2.putText(canvas, f"Obs{i+1}", (centerX-12, centerY), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 2)
     
     return canvas

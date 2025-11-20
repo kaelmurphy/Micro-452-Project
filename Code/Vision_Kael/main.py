@@ -4,15 +4,20 @@ from camera_setup import CameraStream
 from feed_processing import createCanvasAndState, resetStability
 
 def main():
-    cam = CameraStream(index=0, width=1920, height=1080, fps=30).start()  # Reduced to 1080p for better performance
+    cam = CameraStream(index=0, width=1920, height=1080, fps=30).start()
     show_clean_view = True
     window_name = "Vision System"
+    frame_skip = 0  # Skip processing every nth frame for speed
+    displayFrame = None  # Initialize display frame
     
     try:
         while True:
             frame = cam.read()
             if frame is None:
                 continue
+            
+            # Skip heavy processing on some frames for speed
+            frame_skip = (frame_skip + 1) % 2
             
             if show_clean_view:
                 # Create clean blank canvas with only essential elements
@@ -25,8 +30,9 @@ def main():
                 canvas, state = createCanvasAndState(frame)
                 title = "Live Feed - 'q' for clean view | 'r' to reset | 'x' to quit"
             
-            # Display with consistent window handling
-            displayFrame = cv2.resize(canvas, (0, 0), fx=0.5, fy=0.5, interpolation=cv2.INTER_CUBIC)
+            # Optimized display processing
+            if frame_skip == 0 or displayFrame is None:  # Resize when needed
+                displayFrame = cv2.resize(canvas, (960, 540), interpolation=cv2.INTER_LINEAR)  # Fixed size, faster
             cv2.imshow(window_name, displayFrame)
             cv2.setWindowTitle(window_name, title)
             
