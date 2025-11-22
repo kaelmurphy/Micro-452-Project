@@ -1,89 +1,10 @@
-# Author    : Killian Baillifard
-# Date      : 12.11.2025
-# Brief     : Thymio class, handle connection, programs compilation and execution
-
-# Imports
 from tdmclient import ClientAsync, aw
 from tdmclient.clientasyncnode import ClientAsyncNode
 from time import perf_counter
 from enum import Enum
 import numpy as np
-
-# Functions
-def wrap(radians: float) -> float:
-    return (radians + np.pi) % (2 * np.pi) - np.pi
-
-def split_int32(x: int) -> tuple[int, int]:
-    x &= 0xFFFFFFFF
-    lo = x & 0xFFFF
-    if lo >= 0x8000:
-        lo -= 0x10000
-    hi = (x >> 16) & 0xFFFF
-    if hi >= 0x8000:
-        hi -= 0x10000
-    return hi, lo
-    
-def combine_int32(hi: int, lo: int) -> int:
-    hi &= 0xFFFF
-    lo &= 0xFFFF
-    x = (hi << 16) | lo
-    if x >= 0x80000000:
-        x -= 0x100000000
-    return x
-
-def cross2d(a: np.ndarray, b: np.ndarray):
-    return a[0] * b[1] - a[1] * b[0]
-
-def trajectory_direction(x: float, y: float, path: np.ndarray) -> int:
-    if path.shape[0] >= 3:
-        p0 = np.array([x, y])
-        p1 = path[0]
-        p2 = path[1]
-        return -1 if cross2d(p1 - p0, p2 - p1) < 0 else 1
-    else:
-        return 1
-
-def segments_intersection_distance(s1: np.ndarray, s2: np.ndarray) -> float | None:
-    r = s1[1] - s1[0]
-    s = s2[1] - s2[0]
-    r_cross_s = cross2d(r, s)
-    if abs(r_cross_s) < 1e-9:
-        return None
-    q_minus_p = s2[0] - s1[0]
-    t = cross2d(q_minus_p, s) / r_cross_s
-    u = cross2d(q_minus_p, r) / r_cross_s
-    if 0 <= t <= 1 and 0 <= u <= 1:
-        seg_len = np.linalg.norm(r)
-        if seg_len < 1e-12:
-            return None
-        return t * seg_len
-    return None
-
-def path_intersection_distance(path: np.ndarray, segment: np.ndarray) -> tuple[float | None, int | None]:
-    for i in range(len(path) - 1):
-        pathSegment = path[i:(i + 2)]
-        d = segments_intersection_distance(segment, pathSegment)
-        if d is not None:
-            return d, i
-    return None, None
-
-class Calibration():
-
-    def __init__(self, scale: float, track: float) -> None:
-        self.scale = scale # (um/lsb)
-        self.track = track # (mm)
-
-    def mm_to_steps(self, millimeters: float) -> int:
-        return int(np.round(1000 * np.abs(millimeters) / self.scale))
-
-    def steps_to_mm(self, steps: int) -> float:
-        return float(steps * self.scale / 1000)
-    
-    def radians_to_steps(self, radians: float) -> int:
-        return int(self.mm_to_steps(radians * self.track / 2))
-    
-    def steps_to_radians(self, steps: int) -> float:
-        return float(self.steps_to_mm(steps) * 2 / self.track)
+from thymath import *
+from thycal import *
 
 class Thymio():
 
@@ -252,9 +173,6 @@ class Thymio():
             DIR_R = direction
         )
 
-# Robots calibrations
-THYMIO_482_CALIBRATION = Calibration(3.1254, 95.000)
-
 # Tests
 def straight_meter():
     with Thymio(THYMIO_482_CALIBRATION) as thymio:
@@ -263,36 +181,30 @@ def straight_meter():
             aw(thymio.client.sleep(0.5))
             thymio.print_pose()
 
-def back_and_forth():
-    with Thymio(THYMIO_482_CALIBRATION) as thymio:
-        for _ in range(4):
-            thymio.forward(400)
-            while thymio.state == 'forward':
-                aw(thymio.client.sleep(0.5))
-                thymio.print_pose()
-                
-            thymio.turn(np.pi)
-            while thymio.state == 'right turn':
-                aw(thymio.client.sleep(0.5))
-                thymio.print_pose()
+def create_back_and_forth_path(length: float, turns: int):
+    path = []
+    for _ in range(turns):
+            path.append([0.0, 0.0])
+            path.append([length, 0.0])
+    return np.array(path)
 
 def create_square_path(side: float, turns: int) -> np.ndarray:
-    square = []
+    path = []
     for _ in range(turns):
-            square.append([0.0, 0.0])
-            square.append([side, 0.0])
-            square.append([side, side])
-            square.append([0.0, side])
-    return np.array(square)
+            path.append([0.0, 0.0])
+            path.append([side, 0.0])
+            path.append([side, side])
+            path.append([0.0, side])
+    return np.array(path)
 
 def create_rect_path(width: float, height: float, turns: int) -> np.ndarray:
-    rect = []
+    path = []
     for _ in range(turns):
-            rect.append([0.0, 0.0])
-            rect.append([width, 0.0])
-            rect.append([width, height])
-            rect.append([0.0, height])
-    return np.array(rect)
+            path.append([0.0, 0.0])
+            path.append([width, 0.0])
+            path.append([width, height])
+            path.append([0.0, height])
+    return np.array(path)
 
 def follow_path(theta0: float, path: np.ndarray):
 
@@ -320,13 +232,12 @@ def follow_path(theta0: float, path: np.ndarray):
         # State transitions
         def next(i: int) -> None:
             nonlocal path
-            if path.size > i:
-                path = path[i:]
-            else:
-                path = np.array([])
+            path = path[i:]
 
         def face() -> None:
             nonlocal thymio, path, state, millimeters, radians
+            if path.shape[0] <= 1:
+                return
             millimeters, radians = thymio.distance_and_angle_to(path[1])
             thymio.turn(radians)
             state = State.FACE
@@ -379,8 +290,10 @@ def follow_path(theta0: float, path: np.ndarray):
         thymio.theta = theta0
         face()
 
+        log = f'x; y; theta; v; omega\n'
+
         # Run state machine
-        while path.size > 0:
+        while path.shape[0] > 1:
 
             # Run Thymio local navigation
             match state:
@@ -435,11 +348,14 @@ def follow_path(theta0: float, path: np.ndarray):
 
             # TODO Call Kalman filter and do decision making
             aw(thymio.client.sleep(0.5))
-            # thymio.print_pose()
+            log += f'{thymio.x:.3f}; {thymio.y:.3f}; {thymio.theta:.3f}; {thymio.v:.3f}; {thymio.omega:.3f}\n'
+
+        with open('log.csv', 'w') as file:
+            file.write(log)
 
 if __name__ == '__main__':
 
     try:
-        follow_path(0, create_rect_path(200, 600, 4))
+        follow_path(0, create_back_and_forth_path(100, 1))
     except KeyboardInterrupt:
         pass

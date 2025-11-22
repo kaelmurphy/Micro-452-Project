@@ -112,46 +112,62 @@ onevent motor
 	end
 
 	# Accumulate left position
-	r0 = abs motor.left.speed
-	callsub cast16to32
-	r1_hi = r0_hi
-	r1_lo = r0_lo
-	r2_hi = x_l_hi
-	r2_lo = x_l_lo
-	callsub add32
-	x_l_hi = r0_hi
-	x_l_lo = r0_lo
-	
-	# Left speed profile
-	if l_start < 40 then
-		v_l = (1 + l_start) * 10
-		l_start++
-	else
-		v_l = 400
+	if abs motor.left.speed >= 10 then
+		r0 = abs motor.left.speed
+		callsub cast16to32
+		r1_hi = r0_hi
+		r1_lo = r0_lo
+		r2_hi = x_l_hi
+		r2_lo = x_l_lo
+		callsub add32
+		x_l_hi = r0_hi
+		x_l_lo = r0_lo
 	end
 
 	# Accumulate right position
-	r0 = abs motor.right.speed
-	callsub cast16to32
-	r1_hi = r0_hi
-	r1_lo = r0_lo
-	r2_hi = x_r_hi
-	r2_lo = x_r_lo
-	callsub add32
-	x_r_hi = r0_hi
-	x_r_lo = r0_lo
+	if abs motor.right.speed >= 10 then
+		r0 = abs motor.right.speed
+		callsub cast16to32
+		r1_hi = r0_hi
+		r1_lo = r0_lo
+		r2_hi = x_r_hi
+		r2_lo = x_r_lo
+		callsub add32
+		x_r_hi = r0_hi
+		x_r_lo = r0_lo
+	end
+
+	# Raise probed flag when both motors are stopped
+	if abs motor.left.speed < 10 and abs motor.right.speed < 10 and prox_sum >= 4000 then
+		leds.top = [32, 0, 0]
+		motor.left.target = 0
+		motor.right.target = 0
+		probed_flag = 1
+	end
+	
+	# Left speed profile
+	if prox_sum >= 4000 then
+		v_l = 0
+	elseif prox_sum >= 200 then
+		v_l = (4000 - prox_sum) / 20
+	elseif l_start < 20 then
+		v_l = (1 + l_start) * 10
+		l_start++
+	else
+		v_l = 200
+	end
 
 	# Right speed profile
-	if r_start < 40 then
+	if prox_sum >= 4000 then
+		v_r = 0
+	elseif prox_sum >= 200 then
+		v_r = (4000 - prox_sum) / 20
+	elseif r_start < 20 then
 		v_r = (1 + r_start) * 10
 		r_start++
 	else
-		v_r = 400
+		v_r = 200
 	end
-	
-	# Slow stop near obstacle
-	call math.muldiv(v_l, v_l, 4000 - prox_sum, 4000)
-	call math.muldiv(v_r, v_r, 4000 - prox_sum, 4000)
 
 	# Motor output
 	motor.left.target = dir_l * v_l
@@ -165,14 +181,10 @@ onevent prox
 		prox_sum += prox.horizontal[i]
 	end
 
-	# Detect obstacle
-	if prox_sum >= 4000 then
-		leds.top = [32, 0, 0]
-		probed_flag = 1
-		motor.left.target = 0
-		motor.right.target = 0
+	# Ceil sum
+	if prox_sum > 4000 then
+		prox_sum = 4000
 	end
-
 
 onevent timer0
 
