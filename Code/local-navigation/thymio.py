@@ -101,7 +101,8 @@ class Thymio():
 
     def probe_obstacle(self, path: np.ndarray) -> None:
         self.clear = False
-        aw(self.node.set_variables({'state': [1], 'avoid_dir': [-100 * trajectory_direction(self.x, self.y, path)]}))
+        direction = trajectory_direction(path)
+        aw(self.node.set_variables({'state': [1], 'avoid_dir': [direction * 100]}))
 
     def is_blocked(self) -> bool:
         blocked = self.blocked
@@ -219,7 +220,13 @@ def follow_path(theta0: float, path: np.ndarray):
 
 if __name__ == '__main__':
 
+    path = np.array([
+        [0, 0],
+        [400, 0],
+        [800, 400]
+    ])
+
     try:
-        follow_path(0, create_square_path(300, 4))
+        follow_path(0, path)
     except KeyboardInterrupt:
         pass

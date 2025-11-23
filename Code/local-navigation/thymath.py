@@ -3,12 +3,9 @@ import numpy as np
 def cross2d(a: np.ndarray, b: np.ndarray):
     return a[0] * b[1] - a[1] * b[0]
 
-def trajectory_direction(x: float, y: float, path: np.ndarray) -> int:
+def trajectory_direction(path: np.ndarray) -> int:
     if path.shape[0] >= 3:
-        p0 = np.array([x, y])
-        p1 = path[0]
-        p2 = path[1]
-        return -1 if cross2d(p1 - p0, p2 - p1) < 0 else 1
+        return -1 if cross2d(path[1] - path[0], path[2] - path[1]) < 0 else 1
     else:
         return 1
 
