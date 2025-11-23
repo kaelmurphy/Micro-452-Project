@@ -1,255 +1,225 @@
-# Author    : Killian Baillifard
-# Date      : 12.11.2025
-# Brief     : Thymio class, handle connection, programs compilation and execution
-
-# Imports
 from tdmclient import ClientAsync, aw
 from tdmclient.clientasyncnode import ClientAsyncNode
+from enum import Enum
 import numpy as np
+from thymath import *
+from thycal import *
 
-# Calibration class
-class Calibration():
-    """
-    Calibration class for a Thymio robot
-
-    Two values must be calibrated:
-
-        - scale : Coder scale (um/lsb)
-
-        - track : Wheel track (mm)
-    """
-
-    def __init__(self, scale: float, track: float) -> None:
-        self._scale = scale
-        self._track = track
-
-    @property
-    def scale(self) -> float:
-        return self._scale
-    
-    @property
-    def track(self) -> float:
-        return self._track
-
-# Thymio class
 class Thymio():
 
-    # Constants
-    EVENTS_POLLING_PERIOD   = 0.1   # Seconds
-    SEGMENT_TOLERANCE       = 5     # Millimeters
-
-    # Constructor
     def __init__(self, calibration: Calibration) -> None:
         
-        # Robot calibration
-        self._calibration = calibration
-
-        # Robot pose
-        self._x = 0
-        self._y = 0
-        self._theta = 0
-
-        # Event handler
-        self._event = None
-        self._data = None
-
         # Thymio client
-        self._client = ClientAsync()
-        self._node: ClientAsyncNode = None
+        self.client: ClientAsync = ClientAsync()
+        self.node: ClientAsyncNode = None
 
-    # Context manager
+        # Calibration and program
+        self.cal = calibration
+        with open('thymio.aesl') as file:
+            self.program = file.read().format(
+                SCALE = self.cal.scale,
+                TRACK = self.cal.track
+            )
+
+        # Robot state
+        self.t: float = 0
+        self.x: int = 0
+        self.y: int = 0
+        self.theta: float = 0
+        self.v: int = 0
+        self.omega: float = 0
+
+        # Flags
+        self.blocked = False
+        self.clear = False
+
+        # Logs
+        self.log: str = f't (s), x (mm), y (mm), theta (rad), v (mm/s), omega (rad/s)\n'
+
     def __enter__(self) -> 'Thymio':
 
         # Initialize client
-        self._client.__enter__()
-        self._client.add_event_received_listener(self.on_event_received)
+        self.client.__enter__()
+        self.client.add_event_received_listener(self.on_event_received)
         
         # Connect to node
-        self._node = aw(self._client.lock())
-        error = aw(self._node.register_events([
-            ('done', 0),
-            ('obstacle', 1),
-            ('avoided', 4)
+        self.node = aw(self.client.lock())
+        error = aw(self.node.register_events([
+            ('pos', 7),
+            ('blocked', 0),
+            ('clear', 0)
         ]))
         if error is not None:
             raise RuntimeError(f'Event registration error: {error}')
-        aw(self._node.watch(events=True))
+        aw(self.node.watch(events=True))
+        
+        # Compile program
+        error = aw(self.node.compile(self.program))
+        if error is not None:
+            raise RuntimeError(f'Compilation error: {self.program} at line {error['error_line']}:{error['error_col']} {error['error_msg']}')
+
+        # Start program
+        error = aw(self.node.run())
+        if error is not None:
+            raise RuntimeError(f'Error {error['error_code']}')
         return self
 
     def __exit__(self, type, value, traceback) -> None:
-        aw(self._node.stop())
-        aw(self._node.unlock())
-        self._client.__exit__(type, value, traceback)
+        aw(self.node.stop())
+        aw(self.node.unlock())
+        self.client.__exit__(type, value, traceback)
+        with open('log.csv', 'w') as log:
+            log.write(self.log)
 
-    # Pose getters and setters
-    @property
-    def x(self) -> int:
-        return self._x
-    
-    @x.setter
-    def x(self, value: int) -> None:
-        self._x = max(-32768, min(value, 32767))
-
-    @property
-    def y(self) -> int:
-        return self._y
-    
-    @y.setter
-    def y(self, value: int) -> None:
-        self._y = max(-32768, min(value, 32767))
-
-    @property
-    def theta(self) -> float:
-        return self._theta
-
-    @theta.setter
-    def theta(self, value) -> int:
-        self._theta = value
-
-    # Event handler
     def on_event_received(self, node, event_name, event_data):
 
-        # Capture only one event per program
-        if self._event is None:
-            self._event = event_name
-            self._data = event_data
-        else:
-            return
+        match event_name:
+            case 'pos':
+                self.t = event_data[0] + event_data[1] / 1000
+                self.x = event_data[2]
+                self.y = event_data[3]
+                self.theta = np.pi * event_data[4] / 32767
+                self.v = event_data[5] * (self.cal.scale / 100000)
+                self.omega = np.pi * event_data[6] / 32767
+                self.log += f'{self.t}, {self.x}, {self.y}, {self.theta}, {self.v}, {self.omega}\n'
+            case 'blocked':
+                self.blocked = True
+            case 'clear':
+                self.clear = True
 
-    def run(self, program: str, **kwargs) -> tuple[str, list[int]]:
+    def set_pose(self, x: float, y: float, theta: float) -> None:
+        x = int(np.round(x))
+        y = int(np.round(y))
+        theta = int(np.round(32767 * theta / np.pi))
+        aw(self.node.set_variables({'x_mm': [x], 'y_mm': [y], 'theta': [theta]}))
 
-        # Load program
-        with open(program) as file:
-            source = file.read().format(**kwargs)
-        
-        # Compile program
-        error = aw(self._node.compile(source))
-        if error is not None:
-            raise RuntimeError(f'Compilation error: {program} at line {error['error_line']}:{error['error_col']} {error['error_msg']}')
-        
-        # Run program
-        self._event = None
-        self._data = None
-        error = aw(self._node.run())
-        if error is not None:
-            raise RuntimeError(f'Error {error['error_code']}')
-        
-        # Wait for an event
-        while self._event is None:
-            aw(self._client.sleep(Thymio.EVENTS_POLLING_PERIOD))
-        aw(self._node.stop())
-        return self._event, self._data
+    def set_target(self, x: float, y: float) -> None:
+        self.blocked = False
+        x = int(np.round(x))
+        y = int(np.round(y))
+        aw(self.node.set_variables({'state': [0], 'r_x_mm': [x], 'r_y_mm': [y]}))
 
-    # Programs
-    def forward(self, millimeters: int) -> tuple[str, list[int]]:
-        print(f'Moving {millimeters} millimeters')
-        return self.run(
-            'move.aesl',
-            SCALE           = int(self._calibration.scale * 10000),
-            TARGET          = millimeters,
-            LEFT_DIRECTION  = '',
-            RIGHT_DIRECTION = ''
-        )
+    def probe_obstacle(self, path: np.ndarray) -> None:
+        self.clear = False
+        aw(self.node.set_variables({'state': [1], 'avoid_dir': [-100 * trajectory_direction(self.x, self.y, path)]}))
 
-    def turn(self, radians: float) -> tuple[str, list[int]]:
-        print(f'Turning {radians:.3f} radians')
-        return self.run(
-            'move.aesl',
-            SCALE           = int(self._calibration.scale * 10000),
-            TARGET          = int(np.abs(radians * self._calibration.track / 2)),
-            LEFT_DIRECTION  = '' if np.sign(radians) < 0 else '-',
-            RIGHT_DIRECTION = '-' if np.sign(radians) < 0 else ''
-        )
+    def is_blocked(self) -> bool:
+        blocked = self.blocked
+        self.blocked = False
+        return blocked
+    
+    def is_clear(self) -> bool:
+        clear = self.clear
+        self.clear = False
+        return clear
 
-    def move(self, position: np.ndarray) -> str:
-        print(f'Moving to ({position[0]}, {position[1]})')
+# Tests
+def create_back_and_forth_path(length: int, turns: int):
+    path = []
+    for _ in range(turns):
+            path.append([0, 0])
+            path.append([length, 0])
+    return np.array(path)
 
-        # Compute motion vector and direction
-        wrap = lambda radians: (radians + np.pi) % (2 * np.pi) - np.pi
-        vector = np.array([position[0] - self.x, position[1] - self.y])
-        direction = np.angle(complex(vector[0], vector[1]))
+def create_square_path(side: int, turns: int) -> np.ndarray:
+    path = []
+    for _ in range(turns):
+            path.append([0, 0])
+            path.append([side, 0])
+            path.append([side, side])
+            path.append([0, side])
+    return np.array(path)
 
-        # Turn
-        radians = wrap(direction - self.theta)
-        event, data = self.turn(radians)
-        match event:
+def create_rect_path(width: int, height: int, turns: int) -> np.ndarray:
+    path = []
+    for _ in range(turns):
+            path.append([0, 0])
+            path.append([width, 0])
+            path.append([width, height])
+            path.append([0, height])
+    return np.array(path)
 
-            case 'done':
-                self.theta = wrap(self.theta + radians)
+def follow_path(theta0: float, path: np.ndarray):
 
-            case 'obstacle':
-                radians = np.sign(radians) * data[0] * 2 / self._calibration.track
-                self.theta = wrap(self.theta + radians)
-                return 'obstacle'
+    class State(Enum):
+        FOLLOW          = 0
+        FACE_AWAY       = 1
+        EXIT_PATH       = 2
+        PROBE_OBSTACLE  = 3
+        NUDGE_FORWARD   = 4
+        END             = 5
 
-        # Advance
-        millimeters = int(np.linalg.norm(vector))
-        event, data = self.forward(millimeters)
-        match event:
+    # Connect Thymio
+    with Thymio(THYMIO_482_CALIBRATION) as thymio:
 
-            case 'done':
-                self.x = position[0]
-                self.y = position[1]
+        # Set initial position and target
+        thymio.set_pose(path[0][0], path[0][1], theta0)
+        thymio.set_target(path[1][0], path[1][1])
+        state: State = State.FOLLOW
+        TARGET_TOLERANCE = 10
 
-            case 'obstacle':
-                self.x += (data[0] / millimeters) * (position[0] - self.x)
-                self.y += (data[0] / millimeters) * (position[1] - self.y)
-                return 'obstacle'
-            
-        # Target reached
-        return 'done'
+        # Until path is completed
+        while state != State.END:
+            match state:
 
-    def avoid(self, path: np.ndarray) -> int:
-        print(f'Avoiding obstacle')
+                case State.FOLLOW:
+                    if np.linalg.norm([path[1][0] - thymio.x, path[1][1] - thymio.y]) < TARGET_TOLERANCE:
+                        if path.shape[0] > 2:
+                            path = path[1:]
+                            thymio.set_target(path[1][0], path[1][1])
+                        else:
+                            state = State.END
+                    elif thymio.is_blocked():
+                        thymio.probe_obstacle(path)
+                        state = State.FACE_AWAY
 
-        # Angles fixed point conversion
-        to_q15 = lambda radians: int(np.round(32767 * ((radians + np.pi) % (2 * np.pi) - np.pi) / np.pi))
-        to_radians = lambda q15: np.pi * float(q15) / 32767
+                case State.FACE_AWAY:
+                    if thymio.is_clear():
+                        THYMIO_LENGTH = 110
+                        x = int(thymio.x + THYMIO_LENGTH * np.cos(thymio.theta))
+                        y = int(thymio.y + THYMIO_LENGTH * np.sin(thymio.theta))
+                        thymio.set_target(x, y)
+                        state = State.EXIT_PATH
 
-        # Fixed point trigonometric functions
-        fp_cos = lambda vector: vector[0] / np.linalg.norm(vector)
-        fp_sin = lambda vector: vector[1] / np.linalg.norm(vector)
-        q15_cos = lambda vector: int(np.round(32767 * fp_cos(vector)))
-        q15_sin = lambda vector: int(np.round(32767 * fp_sin(vector)))
+                case State.EXIT_PATH:
+                    if np.linalg.norm([x - thymio.x, y - thymio.y]) < TARGET_TOLERANCE:
+                        thymio.probe_obstacle(path)
+                        state = State.PROBE_OBSTACLE
 
-        # Point rotation function
-        rotate_x = lambda vector, point: fp_cos(vector) * point[0] + fp_sin(vector) * point[1]
-        rotate_y = lambda vector, point: -fp_sin(vector) * point[0] + fp_cos(vector) * point[1]
+                case State.PROBE_OBSTACLE:
+                    if thymio.is_clear():
+                        THYMIO_LENGTH = 110
+                        x = int(thymio.x + THYMIO_LENGTH * np.cos(thymio.theta))
+                        y = int(thymio.y + THYMIO_LENGTH * np.sin(thymio.theta))
+                        segment = np.array([[thymio.x, thymio.y], [x, y]])
+                        intersect, index = path_intersection_point(path, segment)
+                        if index is not None:
+                            thymio.set_target(intersect[0], intersect[1])
+                        else:
+                            thymio.set_target(x, y)
+                        state = State.NUDGE_FORWARD
 
-        # Compute path vectors
-        vector_1 = path[1] - path[0]
-        vector_2 = path[2] - path[1] if path.shape[0] > 2 else None
+                case State.NUDGE_FORWARD:
+                    if index is not None:
+                        if np.linalg.norm([intersect[0] - thymio.x, intersect[1] - thymio.y]) < TARGET_TOLERANCE:
+                            path = path[index:]
+                            thymio.set_target(path[1][0], path[1][1])
+                            state = State.FOLLOW
+                    else:
+                        if np.linalg.norm([x - thymio.x, y - thymio.y]) < TARGET_TOLERANCE:
+                            thymio.probe_obstacle(path)
+                            state = State.PROBE_OBSTACLE
 
-        # Avoid obstacle
-        event, data = self.run(
-            'avoid.aesl',
 
-            # Initial position
-            X_MM    = int(self.x),
-            Y_MM    = int(self.y),
-            THETA   = to_q15(self.theta),
+            # TODO Update position with Kalman filter
+            # thymio.set_pose(path[0][0], path[0][1], theta0)
 
-            # Calibration
-            SCALE   = int(np.round(10415 * self._calibration.scale)),
-            TRACK   = int(np.round(11 * 2**15 / (np.pi * self._calibration.track))),
+            # Pace loop
+            aw(thymio.client.sleep(0.2))
 
-            # Collider geometry
-            STATE   = (1 if np.cross(vector_1, vector_2) >= 0 else 0) if vector_2 is not None else 0,
-            C_1     = q15_cos(vector_1),
-            S_1     = q15_sin(vector_1),
-            X_11    = int(rotate_x(vector_1, path[0])),
-            X_12    = int(rotate_x(vector_1, path[1])),
-            Y_1     = int(rotate_y(vector_1, path[0])),
-            C_2     = q15_cos(vector_2) if vector_2 is not None else 0,
-            S_2     = q15_sin(vector_2) if vector_2 is not None else 0,
-            X_21    = int(rotate_x(vector_2, path[1])) if vector_2 is not None else 0,
-            X_22    = int(rotate_x(vector_2, path[2])) if vector_2 is not None else 0,
-            Y_2     = int(rotate_y(vector_2, path[1])) if vector_2 is not None else 0
-        )
-        
-        # Update current position
-        assert event == 'avoided'
-        self.x = data[0]
-        self.y = data[1]
-        self.theta = to_radians(data[2])
-        return data[3]
+if __name__ == '__main__':
+
+    try:
+        follow_path(0, create_square_path(300, 4))
+    except KeyboardInterrupt:
+        pass

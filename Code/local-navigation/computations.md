@@ -27,7 +27,7 @@ $$
 
 ### Unit conversion
 
-First, we solve the simple case of linear motion in the $x$ direction. From the the Thymio cheat sheet we get the constants :
+First, we solve the simple case of linear motion in the $x$ direction. From the Thymio cheat sheet we get the constants :
 $$
 \begin{equation}
 \begin{aligned}
