@@ -9,21 +9,49 @@ from obstacle import detectObstacles, drawObstacles, processObstacles
 ROBOT_ID = 8
 GOAL_ID = 9
 ORIGIN_ID = 3
-STABILITY_FRAMES = 60  # Reduced for faster lock-in
-STABILITY_THRESHOLD = 4.0
-MARKER_SIZE_MM = 96.5  # Updated to actual marker size
+STABILITY_FRAMES = 30
+STABILITY_THRESHOLD = 6.0
+MARKER_SIZE_MM = 96.5
 
 # Global state
 stabilityBuffer = []
-stableScreenshot = None
-isStable = False
+isStable = stableScreenshot = coordinatesCaptured = False
 
 def resetStability():
     """Reset stability tracking state."""
-    global isStable, stableScreenshot, stabilityBuffer
-    isStable = False
-    stableScreenshot = None
+    global isStable, stableScreenshot, coordinatesCaptured
+    isStable = stableScreenshot = coordinatesCaptured = False
     stabilityBuffer.clear()
+    print("\n=== STABILITY RESET ===")
+
+def convertPixelsToWorldCoords(pixelCoords, originPixel, cornersMap, markerSizeMm=MARKER_SIZE_MM):
+    """Convert pixel coordinates to world coordinates."""
+    pixelsPerMm = calculateScale(cornersMap, markerSizeMm)
+    
+    # Handle single coordinate pair
+    if isinstance(pixelCoords, (tuple, list)) and len(pixelCoords) == 2 and isinstance(pixelCoords[0], (int, float, np.integer)):
+        x_mm = (float(pixelCoords[0]) - float(originPixel[0])) / pixelsPerMm
+        y_mm = (float(originPixel[1]) - float(pixelCoords[1])) / pixelsPerMm
+        return (x_mm, y_mm)
+    
+    # Handle list of coordinate pairs
+    result = []
+    for coord in pixelCoords:
+        try:
+            if isinstance(coord, (tuple, list)) and len(coord) >= 2:
+                px, py = float(coord[0]), float(coord[1])
+            elif isinstance(coord, np.ndarray) and coord.size >= 2:
+                flat = coord.flatten()
+                px, py = float(flat[0]), float(flat[1])
+            else:
+                continue
+                
+            x_mm = (px - float(originPixel[0])) / pixelsPerMm
+            y_mm = (float(originPixel[1]) - py) / pixelsPerMm
+            result.append((x_mm, y_mm))
+        except (ValueError, TypeError, IndexError):
+            continue
+    return result
 
 def calculateScale(cornersMap, markerSizeMm=MARKER_SIZE_MM):
     """Calculate pixels per mm using median of all marker edges."""
@@ -33,50 +61,28 @@ def calculateScale(cornersMap, markerSizeMm=MARKER_SIZE_MM):
     edgeLengths = []
     for corners in cornersMap.values():
         if corners is not None and len(corners) == 4:
-            # Calculate all 4 edge lengths for this marker
             for i in range(4):
-                p1, p2 = corners[i], corners[(i + 1) % 4]
-                edgeLength = np.linalg.norm(p2 - p1)
-                if edgeLength > 0:  # Avoid division by zero
+                edgeLength = np.linalg.norm(corners[(i + 1) % 4] - corners[i])
+                if edgeLength > 0:
                     edgeLengths.append(edgeLength)
     
-    if not edgeLengths:
-        return 1.0
-    
-    # Use median for robustness against outliers
-    medianEdgeLength = np.median(edgeLengths)
-    return medianEdgeLength / markerSizeMm
+    return np.median(edgeLengths) / markerSizeMm if edgeLengths else 1.0
 
 def checkStability(state):
     """Check if robot and goal positions are stable across frames."""
-    global stabilityBuffer
-    
-    # Validate required state
-    robot = state.get('robot')
-    goal = state.get('goal') 
-    robotTheta = state.get('robotTheta')
-    
-    if not (robot and goal and robotTheta is not None):
+    robot, goal, theta = state.get('robot'), state.get('goal'), state.get('robotTheta')
+    if not (robot and goal and theta is not None):
         stabilityBuffer.clear()
         return False
     
-    currentState = {
-        'robot': robot, 
-        'goal': goal, 
-        'robotTheta': robotTheta
-    }
+    currentState = {'robot': robot, 'goal': goal, 'robotTheta': theta}
     
     # Check movement against previous frame
     if stabilityBuffer:
-        lastState = stabilityBuffer[-1]
-        robotDiff = np.linalg.norm(np.array(robot) - np.array(lastState['robot']))
-        goalDiff = np.linalg.norm(np.array(goal) - np.array(lastState['goal']))
-        angleDiff = abs(robotTheta - lastState['robotTheta'])
-        
-        # Reset if significant movement detected
-        if (robotDiff > STABILITY_THRESHOLD or 
-            goalDiff > STABILITY_THRESHOLD or 
-            angleDiff > 5.0):
+        last = stabilityBuffer[-1]
+        if (np.linalg.norm(np.array(robot) - np.array(last['robot'])) > STABILITY_THRESHOLD or 
+            np.linalg.norm(np.array(goal) - np.array(last['goal'])) > STABILITY_THRESHOLD or 
+            abs(theta - last['robotTheta']) > 5.0):
             stabilityBuffer.clear()
     
     stabilityBuffer.append(currentState)
@@ -126,9 +132,6 @@ def _handleStabilityAndUI(canvas, state, centers, zoneCornersMm, robotZone, robo
             stableScreenshot = canvas.copy()
             _addStableLabels(stableScreenshot, centers, zoneCornersMm, robotZone, robotThetaZone, goalZone)
             statusLines.append("SYSTEM LOCKED - COORDINATES STABLE")
-            
-            # Print all coordinates when system becomes stable
-            _printAllCoordinates(state, centers, zoneCornersMm, robotZone, robotThetaZone, goalZone)
         else:
             progress = len(stabilityBuffer) / STABILITY_FRAMES * 100
             statusLines.append(f"CALIBRATING... {progress:.0f}% ({len(stabilityBuffer)}/{STABILITY_FRAMES} frames)")
@@ -189,59 +192,51 @@ def _drawTextWithShadow(canvas, text, position, color, shadowOffset=(2, 2)):
     cv2.putText(canvas, text, shadowPos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3)
     cv2.putText(canvas, text, position, cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-def _printAllCoordinates(state, centers, zoneCornersMm, robotZone, robotThetaZone, goalZone):
+def _printAllCoordinates(state, centers, zoneCornersMm, robotZone, robotThetaZone, goalZone, obstacles, cornersMap, originPx):
     """Print all coordinates when system becomes stable."""
     print("\n" + "="*60)
-    print("📍 STABLE COORDINATES DETECTED - ALL POSITIONS (mm)")
+    print("         COORDINATE CAPTURE - STABLE IMAGE DETECTED")
     print("="*60)
     
-    # Print zone corners
+    # Zone corners
     if zoneCornersMm and len(zoneCornersMm) == 4:
-        print("\n🔲 OPERATING ZONE CORNERS:")
         bl, br, tr, tl = zoneCornersMm
-        print(f"  Bottom-Left:  ({bl[0]:6.1f}, {bl[1]:6.1f})")
-        print(f"  Bottom-Right: ({br[0]:6.1f}, {br[1]:6.1f})")
-        print(f"  Top-Right:    ({tr[0]:6.1f}, {tr[1]:6.1f})")
-        print(f"  Top-Left:     ({tl[0]:6.1f}, {tl[1]:6.1f})")
+        print(f"\nOPERATING ZONE CORNERS (mm):")
+        print(f"  Bottom-Left:  ({bl[0]:.1f}, {bl[1]:.1f})")
+        print(f"  Bottom-Right: ({br[0]:.1f}, {br[1]:.1f})")
+        print(f"  Top-Right:    ({tr[0]:.1f}, {tr[1]:.1f})")
+        print(f"  Top-Left:     ({tl[0]:.1f}, {tl[1]:.1f})")
     
-    # Print robot position
+    # Robot position
     if robotZone:
-        print("\n🤖 ROBOT POSITION:")
-        theta_str = f"{robotThetaZone:6.1f}°" if robotThetaZone is not None else "  n/a"
-        print(f"  Position: ({robotZone[0]:6.1f}, {robotZone[1]:6.1f})")
-        print(f"  Rotation: {theta_str}")
+        theta_str = f"{robotThetaZone:.1f}°" if robotThetaZone is not None else "n/a"
+        print(f"\nROBOT POSITION (mm):")
+        print(f"  X: {robotZone[0]:.1f}")
+        print(f"  Y: {robotZone[1]:.1f}")
+        print(f"  Θ: {theta_str}")
     
-    # Print goal position
+    # Goal position
     if goalZone:
-        print("\n🎯 GOAL POSITION:")
-        print(f"  Position: ({goalZone[0]:6.1f}, {goalZone[1]:6.1f})")
+        print(f"\nGOAL POSITION (mm):")
+        print(f"  X: {goalZone[0]:.1f}")
+        print(f"  Y: {goalZone[1]:.1f}")
     
-    # Print obstacles with individual object separation
-    obstacles = state.get('obstacleVertices', [])
+    # Obstacles - use centralized coordinate conversion
     if obstacles:
-        print(f"\n🚧 OBSTACLES DETECTED ({len(obstacles)} objects):")
-        for i, obs in enumerate(obstacles, 1):
-            vertices = obs.get('vertices', [])
-            if vertices:
-                print(f"\n  OBJECT {i}:")
-                print(f"    Area: {obs.get('area', 0):.0f} px²")
-                print(f"    Vertices ({len(vertices)} points) - Counter-Clockwise (World Coordinates):")
-                for j, (x, y) in enumerate(vertices):
-                    # Convert to world coordinates if needed
-                    if 'obstacleVertices' in state and i-1 < len(state['obstacleVertices']):
-                        obstacle_data = state['obstacleVertices'][i-1]
-                        if 'vertices' in obstacle_data and j < len(obstacle_data['vertices']):
-                            world_x, world_y = obstacle_data['vertices'][j]
-                            print(f"      V{j}: ({world_x:6.2f}, {world_y:6.2f}) mm")
-                        else:
-                            print(f"      V{j}: ({x:6.2f}, {y:6.2f}) px")
-                    else:
-                        print(f"      V{j}: ({x:6.2f}, {y:6.2f}) px")
+        print(f"\nOBSTACLES DETECTED: {len(obstacles)}")
+        for i, obstacle in enumerate(obstacles, 1):
+            # Use centralized coordinate conversion
+            vertices = obstacle.getVerticesWorldCoords(cornersMap, originPx)
+            print(f"\n  Obstacle {i}:")
+            print(f"    Area: {obstacle.area:.0f} pixels")
+            print(f"    Vertices (mm, CCW from bottom-left):")
+            for j, (x, y) in enumerate(vertices):
+                print(f"      V{j}: ({x:.1f}, {y:.1f})")
     else:
-        print("\n🚧 OBSTACLES: None detected")
+        print("\nOBSTACLES: None detected")
     
     print("\n" + "="*60)
-    print("✅ Coordinate output complete. System ready for path planning.")
+    print("Press 'R' to reset and capture new coordinates")
     print("="*60 + "\n")
 
 def _drawStatusText(canvas, lines):
@@ -252,16 +247,14 @@ def _drawStatusText(canvas, lines):
         cv2.putText(canvas, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
 def createCanvasAndState(frame):
-    """Optimized main vision processing pipeline."""
-    global stableScreenshot, isStable
+    """Ultra-lightweight main vision processing pipeline."""
+    global stableScreenshot, isStable, coordinatesCaptured
     
-    # Return cached stable state if available for speed
+    # Return frozen stable image if already captured
     if isStable and stableScreenshot is not None:
         return stableScreenshot, {}
     
     canvas = frame.copy()
-    
-    # Single ArUco detection call
     ids, centers, cornersMap, _ = detectAruco(frame)
     zone = buildOperatingZone(centers)
     
@@ -270,67 +263,65 @@ def createCanvasAndState(frame):
         return canvas, {}
     
     originPx = centers[ORIGIN_ID]
-    pixelsPerMm = calculateScale(cornersMap)
-    
-    # Batch coordinate calculations for efficiency
     zoneCornersMm = goalZone = robotZone = robotThetaZone = None
     
     if zone.get('isComplete'):
-        # Vectorized zone coordinate conversion
-        corners_px = zone['corners']
-        origin_array = [float(originPx[0]), float(originPx[1])]
-        zoneCornersMm = [((float(corner[0]) - origin_array[0]) / pixelsPerMm, 
-                         (origin_array[1] - float(corner[1])) / pixelsPerMm) 
-                        for corner in corners_px]
+        zoneCornersMm = convertPixelsToWorldCoords(zone['corners'], originPx, cornersMap)
     
-    # Batch process robot and goal positions
     if GOAL_ID in centers:
-        goalPx = centers[GOAL_ID]
-        # GOAL coordinate conversion formula:
-        goalZone = ((goalPx[0] - originPx[0]) / pixelsPerMm, (originPx[1] - goalPx[1]) / pixelsPerMm)
-        print(f"GOAL: Px({goalPx[0]:.1f},{goalPx[1]:.1f}) -> World({goalZone[0]:.2f},{goalZone[1]:.2f})")
+        goalZone = convertPixelsToWorldCoords(centers[GOAL_ID], originPx, cornersMap)
     
     rCx, rCy, robotTheta = robotWorldPose(centers, cornersMap, ROBOT_ID)
     if rCx is not None and rCy is not None:
-        # ROBOT coordinate conversion formula (rCx,rCy are pixel coordinates):
-        robotZone = ((float(rCx) - originPx[0]) / pixelsPerMm, (originPx[1] - float(rCy)) / pixelsPerMm)
-        print(f"ROBOT: Px({rCx:.1f},{rCy:.1f}) -> World({robotZone[0]:.2f},{robotZone[1]:.2f})")
+        robotZone = convertPixelsToWorldCoords((rCx, rCy), originPx, cornersMap)
         if robotTheta is not None:
             robotThetaZone = np.degrees(robotTheta)
             if robotThetaZone < 0:
                 robotThetaZone += 360
     
-    # Obstacle detection and processing (after coordinate setup)
+    # Obstacle detection
     obstacles = []
-    obstacleVerticesData = []
-    if zone.get('isComplete'):
-        obstacles = detectObstacles(frame, zone)
-        if obstacles:
-            obstacleVerticesData, _ = processObstacles(obstacles, pixelsPerMm, originPx, printInfo=False)
+    if zone.get('isComplete') and not isStable:
+        obstacles = detectObstacles(frame, zone, minArea=2500)
     
-    # Consolidated rendering operations
+    # Minimal rendering
     if zone.get('isComplete'):
         canvas = drawOperatingZone(canvas, zone)
     
     if obstacles:
-        canvas = drawObstacles(canvas, obstacles, pixelsPerMm, originPx)
+        canvas = drawObstacles(canvas, obstacles, cornersMap, originPx, False, False)
     
-    # Draw coordinate axes and markers in batch
-    _drawCoordinateAxes(canvas, originPx)
-    _drawMarkers(canvas, centers, cornersMap)
+    # Draw markers
+    from draw_utils import drawCoordinateSystem, drawRobotMarker, drawGoalMarker
+    drawCoordinateSystem(canvas, originPx)
+    
+    if ROBOT_ID in centers:
+        drawRobotMarker(canvas, centers[ROBOT_ID], cornersMap.get(ROBOT_ID))
+    if GOAL_ID in centers:
+        drawGoalMarker(canvas, centers[GOAL_ID])
     
     # Build state
     state = {
-        'zoneCorners': zoneCornersMm,
         'goal': goalZone,
         'robot': robotZone,
         'robotTheta': robotThetaZone,
-        'obstacles': [obs.toDict() for obs in obstacles],
-        'obstacleVertices': obstacleVerticesData  # This contains CCW-corrected vertices
+        'obstacles': [obs.toDict() for obs in obstacles]
     }
     
-    # Handle stability and UI
-    canvas = _handleStabilityAndUI(canvas, state, centers, zoneCornersMm, robotZone, robotThetaZone, goalZone)
+    # Stability system
+    if not isStable and checkStability(state):
+        isStable = True
+        stableScreenshot = canvas.copy()
+        if not coordinatesCaptured:
+            coordinatesCaptured = True
+            _printAllCoordinates(state, centers, zoneCornersMm, robotZone, robotThetaZone, goalZone, obstacles, cornersMap, originPx)
+    
+    # Status display
+    stability_progress = len(stabilityBuffer) / STABILITY_FRAMES
+    if isStable:
+        cv2.putText(canvas, "STABLE", (canvas.shape[1]-120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    else:
+        cv2.putText(canvas, f"STABILIZING {int(stability_progress * 100)}%", (canvas.shape[1]-200, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
     
     return canvas, state
 
