@@ -2,7 +2,7 @@
 
 ## Odometry
 
-The Thymio robot in our use case has 3 DOF, two translational and one rotational : $[x, y, \theta]^T$. The goal is to find the change in position over one time step :
+The Thymio robot in our use case has **3 DOF**, two translational and one rotational : $[x, y, \theta]^T$. The goal is to find the change in position over one time step :
 $$
 \begin{equation}
 \begin{bmatrix}
@@ -46,7 +46,9 @@ $$
 \end{align}
 $$
 
-### Linear integration
+## Units conversion
+
+### Distance integration
 
 First, we solve the simple case of linear motion in the $x$ direction. From the Thymio cheat sheet we get the constants :
 $$
@@ -102,7 +104,7 @@ $$
 \end{equation}
 $$
 
-## Controller
+## Control
 
 ### Astolfi
 
@@ -128,7 +130,7 @@ This controller offer a nice spline motion, but it gets numerically unstable as 
 
 ### Custom controller
 
-To fix this, we need a new framework. Lets only take the distance error $e$ and the the robot to target heading error $\varepsilon$ to release one constraint :
+To fix this the controller is simplified. Only the distance error $e$ and the target heading error $\varepsilon$ are used :
 $$
 \begin{align}
 e &= \sqrt{\Delta x^2 + \Delta y^2} \\
@@ -136,7 +138,7 @@ e &= \sqrt{\Delta x^2 + \Delta y^2} \\
 \end{align}
 $$
 
-Then, assuming $e \in [0, e_{max}]$ and $\varepsilon \in [-\pi, \pi[$, we instead formulate the controller as :
+Then, assuming $e \in [0, e_{max}]$ and $\varepsilon \in [-\pi, \pi[$, the controller is modified as :
 $$
 \begin{align}
 v &= k_e \cdot e \cdot (\pi - |\varepsilon|) \\
