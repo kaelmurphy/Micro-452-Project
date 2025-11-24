@@ -5,3 +5,4 @@ venv/
 .env/
 .vscode/
 **/*.DS_store
+**/*.drawio.bkp
