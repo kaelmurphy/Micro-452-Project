@@ -108,7 +108,7 @@ def setup_globalnav_plot(
 
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
-    
+
     # ---------------------------------------------------------
     # Polygon colors
     # ---------------------------------------------------------
@@ -225,7 +225,7 @@ def setup_globalnav_plot(
 
     ax.set_xlabel("X [mm]")
     ax.set_ylabel("Y [mm]")
-    ax.set_title("Original vs Inflated Obstacles + Visibility Graph + A* Path + Odometry")
+    ax.set_title("Original vs Inflated Obstacles + A* Path + Odometry")
 
     # ---------------------------------------------------------
     # Legend outside the plot (on the right)
