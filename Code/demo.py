@@ -1,4 +1,5 @@
 import numpy as np
+from matplotlib import pyplot as plt
 from enum import Enum
 from tdmclient import aw
 from localnav import *
@@ -11,7 +12,10 @@ def main():
     # TODO Find optimal path
     path = np.array([
         [0, 0],
-        [400, 0]
+        [200, 0],
+        [200, 200],
+        [0, 200],
+        [0, 0]
     ])
 
     # Local navigation state machine
@@ -26,8 +30,18 @@ def main():
     # Connect Thymio
     with Thymio(THYMIO_482_CALIBRATION) as thymio:
 
-        # Set initial position and target
+        # Set initial position
         thymio.set_pose(path[0][0], path[0][1], theta0)
+
+        # Create figure
+        plt.ion()
+        fig = plt.figure('Thymio')
+        ax = fig.add_subplot(111)
+        x_data = [thymio.x]
+        y_data = [thymio.y]
+        lines = ax.plot(x_data, y_data, 'r-')
+
+        # Initialize state machine
         thymio.set_target(path[1][0], path[1][1])
         state: State = State.FOLLOW
         TARGET_TOLERANCE = 10 # mm
@@ -91,6 +105,15 @@ def main():
             # TODO Camera acquisition
             # TODO Update position with Kalman filter
             # thymio.set_pose(path[0][0], path[0][1], theta0)
+
+            # Draw updated position
+            x_data.append(thymio.x)
+            y_data.append(thymio.y)
+            lines[0].set_data(x_data, y_data)
+            ax.relim()
+            ax.autoscale_view()
+            fig.canvas.draw()
+            fig.canvas.flush_events()
 
             # Pace loop
             aw(thymio.client.sleep(0.2))
