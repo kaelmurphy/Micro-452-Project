@@ -1,9 +1,7 @@
 import numpy as np
-from localnav.thymio import Thymio
-from localnav.thycal import THYMIO_482_CALIBRATION
-from localnav.thymath import *
 from enum import Enum
 from tdmclient import aw
+from localnav import *
 
 def main():
 
@@ -13,8 +11,7 @@ def main():
     # TODO Find optimal path
     path = np.array([
         [0, 0],
-        [400, 0],
-        [800, 400]
+        [400, 0]
     ])
 
     # Local navigation state machine
