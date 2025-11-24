@@ -39,7 +39,7 @@ def main():
         ax = fig.add_subplot(111)
         x_data = [thymio.x]
         y_data = [thymio.y]
-        lines = ax.plot(x_data, y_data, 'r-')
+        lines = ax.plot(x_data, y_data, 'r.-')
 
         # Initialize state machine
         thymio.set_target(path[1][0], path[1][1])
