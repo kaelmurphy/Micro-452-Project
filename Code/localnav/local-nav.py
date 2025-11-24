@@ -1,6 +1,7 @@
 import numpy as np
 from thymio import Thymio
 from thycal import THYMIO_482_CALIBRATION
+from thymath import *
 from enum import Enum
 from tdmclient import aw
 
