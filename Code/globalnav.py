@@ -39,7 +39,7 @@ def _df_from_input(map_array: np.ndarray) -> pd.DataFrame:
         if map_array.ndim != 2 or map_array.shape[1] < 4:
             raise ValueError("map_array must have shape (N, 4) with columns [id, type, x, y].")
 
-        df = pd.DataFrame(map_array, columns=["id", "type", "x", "y"])
+        df = pd.DataFrame(map_array, columns=["type", "id", "label", "x", "y"])
 
     # Normalize column names
     df.columns = [c.lower().strip() for c in df.columns]
@@ -365,6 +365,7 @@ def compute_global_path(
 
     # 6) Build neighbors (visibility graph)
     neighbors_eps = build_neighbors(node_coords_eps, world_poly_eps, obstacle_polys_eps)
+    print(neighbors_eps)
     
     print("\n=== NEIGHBOR COUNTS ===")
     for i, nbrs in enumerate(neighbors_eps):
@@ -376,11 +377,10 @@ def compute_global_path(
     )
 
     if path_indices is None:
-        raise RuntimeError("No path found by A* for the given map and inflation radius.")
-
-    # Optional: debug path labels & coordinates
-    print("Path labels:", [node_labels_eps[i] for i in path_indices])
-    print("Path coordinates:", [node_coords_eps[i] for i in path_indices])
+        print("No path found by A* for the given map and inflation radius.")
+    else:
+        print("Path labels:", [node_labels_eps[i] for i in path_indices])
+        print("Path coordinates:", [node_coords_eps[i] for i in path_indices])
 
     # 8) Turn into NumPy array: global_path
     global_path = np.array([node_coords_eps[i] for i in path_indices], dtype=float)

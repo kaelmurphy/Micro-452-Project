@@ -3,20 +3,18 @@ from matplotlib import pyplot as plt
 from enum import Enum
 from tdmclient import aw
 from localnav import *
+from globalnav import *
 
 def main():
 
     # TODO Acquire first image
     theta0 = 0
 
-    # TODO Find optimal path
-    path = np.array([
-        [0, 0],
-        [200, 0],
-        [200, 200],
-        [0, 200],
-        [0, 0]
-    ])
+    # Find optimal path
+    df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
+    map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
+    path = compute_global_path(map_array, epsilon_mm=20.0)
+    print(path)
 
     # Local navigation state machine
     class State(Enum):
@@ -37,8 +35,9 @@ def main():
         plt.ion()
         fig = plt.figure('Thymio')
         ax = fig.add_subplot(111)
-        x_data = [thymio.x]
-        y_data = [thymio.y]
+        ax.set_aspect('equal')
+        x_data = [path[0][0]]
+        y_data = [path[0][1]]
         lines = ax.plot(x_data, y_data, 'r.-')
 
         # Initialize state machine
@@ -117,6 +116,13 @@ def main():
 
             # Pace loop
             aw(thymio.client.sleep(0.2))
+
+    plt.ioff()
+    plt.figure('Final')
+    plt.subplot(111)
+    plt.gca().set_aspect('equal')
+    plt.plot(x_data, y_data, 'r.-')
+    plt.show()
 
 if __name__ == '__main__':
 
