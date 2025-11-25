@@ -231,7 +231,7 @@ def _extractCoordinatesFromFrame(frame, centers, cornersMap, zone, originPx):
                     float(y)
                 ])
 
-        return np.array(coordinates_list, dtype=object) if coordinates_list else np.array([]).reshape(0, 5)
+        return np.array(coordinates_list, dtype=object) if coordinates_list else np.array([]).reshape(0, 5), robotTheta
 
     except Exception:
         return np.array([]).reshape(0, 5)

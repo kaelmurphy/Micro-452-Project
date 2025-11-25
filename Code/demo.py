@@ -5,15 +5,15 @@ from tdmclient import aw
 from localnav import *
 from globalnav import *
 from globalnav_plot import setup_globalnav_plot
+from Vision_Kael.vision_interface import getCoordinatesFromVision
 
 def main():
 
     SIMULATION_MODE = False
 
-    # TODO Acquire first image
-    theta0 = 0
-
     # Find optimal path
+    coords, theta0 = getCoordinatesFromVision(timeout=15, stabilityFrames=60, show_display=False)
+    print(coords)
     df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
     map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
     path = compute_global_path(map_array, epsilon_mm=50.0)
