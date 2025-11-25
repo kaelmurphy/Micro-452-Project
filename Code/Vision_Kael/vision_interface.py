@@ -34,7 +34,7 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
         xy1 = arr1[:, -2:].astype(float)
         xy2 = arr2[:, -2:].astype(float)
         return np.all(np.abs(xy1 - xy2) < tol)
-    bufferLen = max(2, stabilityFrames // 2)
+    bufferLen = 15  # Require 15 stable frames for robust output
     coordsBuffer = []
     camera = None
     try:
@@ -108,14 +108,14 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
                 has_goal = np.any(types == 'goal')
                 has_obstacle = np.any(types == 'obstacle')
                 # For obstacles, compare by obstacle index and vertices
-                def obstacles_are_similar(obs_arr1, obs_arr2, tol=10.0):
+                def obstacles_are_similar(obs_arr1, obs_arr2, tol=20.0):
                     if len(obs_arr1) != len(obs_arr2):
                         return False
                     for row1, row2 in zip(obs_arr1, obs_arr2):
                         if row1[2] != row2[2] or row1[1] != row2[1]:
                             return False
-                        x1, y1 = row1[3], row1[4]
-                        x2, y2 = row2[3], row2[4]
+                        x1, y1 = round(row1[3], 1), round(row1[4], 1)
+                        x2, y2 = round(row2[3], 1), round(row2[4], 1)
                         if abs(x1 - x2) > tol or abs(y1 - y2) > tol:
                             return False
                     return True
@@ -127,11 +127,10 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
                         coordsBuffer.append(coords.copy())
                         if len(coordsBuffer) > bufferLen:
                             coordsBuffer = coordsBuffer[-bufferLen:]
-                        # Check if all buffered arrays are similar
-                        if len(coordsBuffer) == bufferLen and all(obstacles_are_similar(
+                        # If all buffered arrays are similar, or if bufferLen reached and all elements are present, return immediately
+                        if (len(coordsBuffer) == bufferLen and all(obstacles_are_similar(
                             [row for row in c if row[0] == 'obstacle'],
-                            [row for row in coordsBuffer[0] if row[0] == 'obstacle']) for c in coordsBuffer):
-                            # No minimum wait time needed
+                            [row for row in coordsBuffer[0] if row[0] == 'obstacle']) for c in coordsBuffer)) or (len(coordsBuffer) == bufferLen and has_corners and has_robot and has_goal and has_obstacle):
                             if camera is not None:
                                 camera.stop()
                             if show_display:
@@ -221,6 +220,7 @@ def _extractCoordinatesFromFrame(frame, centers, cornersMap, zone, originPx):
                 world_vertices = [world_vertices]
             if isinstance(world_vertices, np.ndarray):
                 world_vertices = world_vertices.tolist()
+            num_corners = len(world_vertices)
             poly_id = f"poly{obs_idx+2}"
             for v_idx, (x, y) in enumerate(world_vertices):
                 coordinates_list.append([

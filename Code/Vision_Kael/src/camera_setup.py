@@ -6,7 +6,7 @@ import threading
 
 class CameraStream:
     def __init__(self, width=640, height=480, fps=30):
-        self.index = 1  # Hardcoded camera index
+        self.index = 0  # Hardcoded camera index
         self.cap = cv2.VideoCapture(self.index, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera at index {self.index}.")

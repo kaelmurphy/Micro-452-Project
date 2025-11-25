@@ -16,10 +16,11 @@ class Obstacle:
     @property
     def vertices(self):
         if self._vertices is None:
-            # Use approxPolyDP to simplify contour to polygon (5-8 vertices)
+            # Use approxPolyDP with higher epsilon for fewer, more prominent vertices
             peri = cv2.arcLength(self.contour, True)
-            approx = cv2.approxPolyDP(self.contour, 0.02 * peri, True)
-            self._vertices = [(int(p[0][0]), int(p[0][1])) for p in approx]
+            approx = cv2.approxPolyDP(self.contour, 0.018 * peri, True)
+            # Round coordinates for stability
+            self._vertices = [(int(round(p[0][0])), int(round(p[0][1]))) for p in approx]
         return self._vertices
     
     def getVerticesWorldCoords(self, cornersMap, origin):
@@ -64,10 +65,11 @@ def detectObstacles(frame, zone, minArea=4000, maxArea=50000, colorRange=None):
     else:
         zone_mask[:] = 255
 
-    # Use BGR filtering for dark teal (#114268, BGR: 104, 66, 17)
-    lower_teal = np.array([76, 36, 0])    # BGR: B, G, R (allow slightly darker)
-    upper_teal = np.array([134, 94, 44])  # allow slightly lighter
-    mask = cv2.inRange(frame, lower_teal, upper_teal)
+    # Use BGR filtering for new obstacle color (#3d7c80, BGR: 128, 124, 61)
+    # BGR: (128, 124, 61) -- allow a range around this value
+    lower_obstacle = np.array([80, 70, 20])     # BGR: tighter lower bound
+    upper_obstacle = np.array([180, 170, 110])  # BGR: tighter upper bound
+    mask = cv2.inRange(frame, lower_obstacle, upper_obstacle)
 
     # Apply zone mask
     mask = cv2.bitwise_and(mask, zone_mask)
