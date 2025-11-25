@@ -5,31 +5,31 @@ from tdmclient import aw
 from localnav import *
 from globalnav import *
 from globalnav_plot import setup_globalnav_plot
+from Vision_Kael.vision_interface import getCoordinatesFromVision
 
 def main():
 
-    SIMULATION_MODE = True
-
-    # TODO Acquire first image
-    theta0 = 0
+    SIMULATION_MODE = False
 
     # Find optimal path
+    coords, theta0 = getCoordinatesFromVision(timeout=15, stabilityFrames=60, show_display=False)
+    print(coords)
     df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
     map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
-    path = compute_global_path(map_array, epsilon_mm=20.0)
+    path = compute_global_path(map_array, epsilon_mm=50.0)
     print("A* global path:\n", path)
 
     # Global nav plot: map + polygons + A* path + empty odometry line
     path, debug, fig_nav, ax_nav, odom_line = setup_globalnav_plot(
         map_array,
-        epsilon_mm=20.0,
+        epsilon_mm=50.0,
         show_neighbors=False,  # or True if you want visibility edges
     )
     print("A* global path:\n", path)
 
      # If no robot -> just show map
     if SIMULATION_MODE:
-        print("SIMULATION MODE ENABLED – skipping Thymio loop.")
+        print("SIMULATION MODE ENABLED - skipping Thymio loop.")
         plt.ioff()
         plt.show()   # Shows the big map window!
         return
@@ -48,15 +48,6 @@ def main():
 
         # Set initial position
         thymio.set_pose(path[0][0], path[0][1], theta0)
-
-        # Create figure
-        plt.ion()
-        fig = plt.figure('Thymio')
-        ax = fig.add_subplot(111)
-        ax.set_aspect('equal')
-        x_data = [path[0][0]]
-        y_data = [path[0][1]]
-        lines = ax.plot(x_data, y_data, 'r.-')
 
         # Initialize state machine
         thymio.set_target(path[1][0], path[1][1])
@@ -117,25 +108,15 @@ def main():
                             thymio.probe_obstacle(path)
                             state = State.PROBE_OBSTACLE
 
-            # Global navigation
-
-            # TODO Camera acquisition
-            # TODO Update position with Kalman filter
-            # thymio.set_pose(path[0][0], path[0][1], theta0)
-
-            # Draw updated position
-            x_data.append(thymio.x)
-            y_data.append(thymio.y)
-            lines[0].set_data(x_data, y_data)
-            ax.relim()
-            ax.autoscale_view()
-            fig.canvas.draw()
-            fig.canvas.flush_events()
-
-            # Pace loop
+            # Pace loop at 200 ms
             aw(thymio.client.sleep(0.2))
 
-            # Also update global navigation plot
+            # TODO Camera acquisition
+            # TODO Kalman filter
+            # TODO Update position with new estimation
+            # thymio.set_pose(path[0][0], path[0][1], theta0)
+
+            # Update main navigation plot
             xs, ys = odom_line.get_data()
             xs = list(xs) + [thymio.x]
             ys = list(ys) + [thymio.y]
@@ -143,12 +124,7 @@ def main():
             fig_nav.canvas.draw()
             fig_nav.canvas.flush_events()
 
-
     plt.ioff()
-    plt.figure('Final')
-    plt.subplot(111)
-    plt.gca().set_aspect('equal')
-    plt.plot(x_data, y_data, 'r.-')
     plt.show()
 
 if __name__ == '__main__':
