@@ -1,7 +1,8 @@
 import cv2
 import numpy as np
 import math
-from camera_setup import CameraStream
+from .camera_setup import CameraStream
+from .feed_processing import convertPixelsToWorldCoords
 
 # Global variables for temporal smoothing
 contourHistory = []
@@ -18,13 +19,12 @@ class Obstacle:
         if self._vertices is None:
             # Use approxPolyDP with higher epsilon for fewer, more prominent vertices
             peri = cv2.arcLength(self.contour, True)
-            approx = cv2.approxPolyDP(self.contour, 0.018 * peri, True)
+            approx = cv2.approxPolyDP(self.contour, 0.02 * peri, True)
             # Round coordinates for stability
             self._vertices = [(int(round(p[0][0])), int(round(p[0][1]))) for p in approx]
         return self._vertices
     
     def getVerticesWorldCoords(self, cornersMap, origin):
-        from feed_processing import convertPixelsToWorldCoords
         world_vertices = convertPixelsToWorldCoords(self.vertices, origin, cornersMap)
         return self._sortVerticesCCWFromBottomLeft(world_vertices)
     

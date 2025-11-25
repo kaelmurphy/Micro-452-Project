@@ -1,9 +1,9 @@
 import cv2
 import numpy as np
-from aruco_utils import detectAruco, buildOperatingZone
-from draw_utils import drawOperatingZone
-from coord_utils import robotWorldPose, asXy
-from obstacle import detectObstacles, drawObstacles, processObstacles
+from .aruco_utils import detectAruco, buildOperatingZone
+from .draw_utils import drawOperatingZone
+from .coord_utils import robotWorldPose, asXy
+from .obstacle import detectObstacles, drawObstacles, processObstacles
 
 # Configuration constants
 ROBOT_ID = 8
