@@ -4,8 +4,11 @@ from enum import Enum
 from tdmclient import aw
 from localnav import *
 from globalnav import *
+from globalnav_plot import setup_globalnav_plot
 
 def main():
+
+    SIMULATION_MODE = True
 
     # TODO Acquire first image
     theta0 = 0
@@ -14,7 +17,22 @@ def main():
     df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
     map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
     path = compute_global_path(map_array, epsilon_mm=20.0)
-    print(path)
+    print("A* global path:\n", path)
+
+    # Global nav plot: map + polygons + A* path + empty odometry line
+    path, debug, fig_nav, ax_nav, odom_line = setup_globalnav_plot(
+        map_array,
+        epsilon_mm=20.0,
+        show_neighbors=False,  # or True if you want visibility edges
+    )
+    print("A* global path:\n", path)
+
+     # If no robot -> just show map
+    if SIMULATION_MODE:
+        print("SIMULATION MODE ENABLED – skipping Thymio loop.")
+        plt.ioff()
+        plt.show()   # Shows the big map window!
+        return
 
     # Local navigation state machine
     class State(Enum):
@@ -116,6 +134,15 @@ def main():
 
             # Pace loop
             aw(thymio.client.sleep(0.2))
+
+            # Also update global navigation plot
+            xs, ys = odom_line.get_data()
+            xs = list(xs) + [thymio.x]
+            ys = list(ys) + [thymio.y]
+            odom_line.set_data(xs, ys)
+            fig_nav.canvas.draw()
+            fig_nav.canvas.flush_events()
+
 
     plt.ioff()
     plt.figure('Final')
