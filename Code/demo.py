@@ -5,23 +5,24 @@ from tdmclient import aw
 from localnav import *
 from globalnav import *
 from globalnav_plot import setup_globalnav_plot
-from Vision_Kael.vision_interface import getCoordinatesFromVision
+from vision import getCoordinatesFromVision
 
 def main():
 
-    SIMULATION_MODE = False
+    SIMULATION_MODE = True
 
     # Find optimal path
-    coords, theta0 = getCoordinatesFromVision(timeout=15, stabilityFrames=60, show_display=False)
+    theta0 = 0.0  # Initial orientation in radians
+    coords = getCoordinatesFromVision(timeout=None, show_display=True)
     print(coords)
-    df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
-    map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
-    path = compute_global_path(map_array, epsilon_mm=50.0)
+    # df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
+    # map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
+    path = compute_global_path(coords, epsilon_mm=50.0)
     print("A* global path:\n", path)
 
     # Global nav plot: map + polygons + A* path + empty odometry line
     path, debug, fig_nav, ax_nav, odom_line = setup_globalnav_plot(
-        map_array,
+        coords,
         epsilon_mm=50.0,
         show_neighbors=False,  # or True if you want visibility edges
     )
