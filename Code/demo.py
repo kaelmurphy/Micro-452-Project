@@ -5,7 +5,7 @@ from tdmclient import aw
 from localnav import *
 from globalnav import *
 from globalnav_plot import setup_globalnav_plot
-from vision import getCoordinatesFromVision
+from vision import getVisionCoords
 
 def main():
 
@@ -13,8 +13,8 @@ def main():
 
     # Find optimal path
     theta0 = 0.0  # Initial orientation in radians
-    coords = getCoordinatesFromVision(timeout=None, show_display=True)
-    print(coords)
+    coords, theta1 = getVisionCoords(timeout=None, showDisplay=True)
+    print(coords, "radians: {:.2f}".format(theta1))
     # df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
     # map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
     path = compute_global_path(coords, epsilon_mm=50.0)

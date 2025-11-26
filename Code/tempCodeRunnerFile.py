@@ -1,2 +1,0 @@
-dians
-    coords = getCoordinatesFromVision(timeout
