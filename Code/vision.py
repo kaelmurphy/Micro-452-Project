@@ -158,15 +158,15 @@ def computeHomography(zone):
 
     src = np.array(zone["corners"], dtype=np.float32)
 
-    widthMm = 1189.0
-    heightMm = 841.0
+    widthMm = 1255.0
+    heightMm = 740
 
     dst = np.array(
         [
             [0.0, 0.0],
-            [widthMm, 0.0],
-            [widthMm, heightMm],
-            [0.0, heightMm],
+            [1290, 0.0],
+            [1290, 750],
+            [0.0, 740],
         ],
         dtype=np.float32,
     )
@@ -317,7 +317,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
         coords: numpy array [type, id, label, x, y] in A0 mm
         robotThetaWorld: float angle in radians in A0 world frame, or None
     """
-    bufferLen = 100
+    bufferLen = 1
     coordBuf = []
     camera = None
 
