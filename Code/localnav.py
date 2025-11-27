@@ -150,4 +150,4 @@ class Thymio():
         self.clear = False
         return clear
 
-THYMIO_482_CALIBRATION = Calibration(31254, 1098)
+THYMIO_482_CALIBRATION = Calibration(31254, 1600)
