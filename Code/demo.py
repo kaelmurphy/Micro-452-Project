@@ -30,7 +30,7 @@ def main():
         print(coords, "Initial orientation: {:.2f}".format(theta0))
 
     # Compute best path
-    path = compute_global_path(coords, epsilon_mm=50.0)
+    path = compute_global_path(coords, epsilon_mm=65.0)
     print("A* global path:\n", path)
 
     # Global nav plot: map + polygons + A* path + empty odometry line
@@ -75,6 +75,8 @@ def main():
         try:
             # Until path is completed
             while state != State.END:
+
+                lastDebug = perf_counter()
 
                 # Local navigation
                 match state:
@@ -127,6 +129,10 @@ def main():
                                 thymio.probe_obstacle(path)
                                 state = State.PROBE_OBSTACLE
 
+                newDebug = perf_counter()
+                localNavTime = newDebug - lastDebug
+                lastDebug = newDebug
+
                 # TODO Camera acquisition
                 coords, theta = getVisionCoords(timeout=None, showDisplay=False)
                 # --- Update camera trajectory & arrow (green) ---
@@ -150,6 +156,10 @@ def main():
                     # if coords are not in the expected shape, just skip this frame
                     print("Camera plotting error:", e)
 
+                newDebug = perf_counter()
+                camAcquisitionTime = newDebug - lastDebug
+                lastDebug = newDebug
+
                 # Run Kalman filter
 
                 newTime = perf_counter()
@@ -160,8 +170,16 @@ def main():
                 x_prev = np.array([thymio.x, thymio.y, thymio.theta])
                 x_new, P = ekf_step(x_prev, P, thymio.v, thymio.omega, z_cam, True, elapsed, Q, R_cam)
 
+                newDebug = perf_counter()
+                kalmanTime = newDebug - lastDebug
+                lastDebug = newDebug
+
                 # Update position with new estimation
                 thymio.set_pose(x_new[0], x_new[1], x_new[2])
+
+                newDebug = perf_counter()
+                posUpdateTime = newDebug - lastDebug
+                lastDebug = newDebug
                 
                 # -------------------------------------------------
                 # UPDATE MATPLOTLIB PLOT (ODOMETRY + ARROW)
@@ -184,11 +202,14 @@ def main():
                 fig.canvas.draw()
                 fig.canvas.flush_events()
 
+                newDebug = perf_counter()
+                plotTime = newDebug - lastDebug
+                lastDebug = newDebug
+
+                print(f'localNavTime {localNavTime:.3f} camAcquisitionTime {camAcquisitionTime:.3f} kalmanTime {kalmanTime:.3f} posUpdateTime {posUpdateTime:.3f} plotTime {plotTime:.3f}')
+
                 # Pace loop at 20 ms
                 aw(thymio.client.sleep(0.02))
-                # print(f"Elapsed time: {elapsed * 1000:.1f} ms, time to go {(SAMPLE_PERIOD - elapsed) * 1000:.1f} ms")
-                # if elapsed < SAMPLE_PERIOD:
-                #     aw(thymio.client.sleep(SAMPLE_PERIOD - elapsed))
         
         finally:
             print("Exiting control loop.")
