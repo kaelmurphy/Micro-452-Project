@@ -158,8 +158,8 @@ def computeHomography(zone):
 
     src = np.array(zone["corners"], dtype=np.float32)
 
-    widthMm = 1189.0
-    heightMm = 841.0
+    widthMm = 1250.0
+    heightMm = 740.0
 
     dst = np.array(
         [
@@ -370,6 +370,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         thickness=-1,
                     )
                 
+                # White paintover for goal in obstacle frame
                 if GOAL_ID in centerMap and GOAL_ID in cornerMap:
                     gx, gy = centerMap[GOAL_ID]
                     goalCorners = cornerMap[GOAL_ID].astype(np.int32)
@@ -560,7 +561,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
         return np.array(coordList, dtype=object) if coordList else np.array([]).reshape(0, 5)
 
     except Exception:
-        print("No coordinates extracted from frame due to error.")
+        print("error.")
         return np.array([]).reshape(0, 5)
 
 
