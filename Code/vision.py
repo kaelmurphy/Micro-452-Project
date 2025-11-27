@@ -164,9 +164,9 @@ def computeHomography(zone):
     dst = np.array(
         [
             [0.0, 0.0],
-            [1290, 0.0],
-            [1290, 750],
-            [0.0, 740],
+            [widthMm, 0.0],
+            [widthMm, heightMm],
+            [0.0, heightMm],
         ],
         dtype=np.float32,
     )

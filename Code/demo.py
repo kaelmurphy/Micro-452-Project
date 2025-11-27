@@ -30,7 +30,7 @@ def main():
         print(coords, "Initial orientation: {:.2f}".format(theta0))
 
     # Compute best path
-    path = compute_global_path(coords, epsilon_mm=50.0)
+    path = compute_global_path(coords, epsilon_mm=65.0)
     print("A* global path:\n", path)
 
     # Global nav plot: map + polygons + A* path + empty odometry line
