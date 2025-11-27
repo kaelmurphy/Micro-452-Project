@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="images/BOMR.png" width="100%">
-</p>
-
 ## Global Navigation: Global Path Planning
 
 In this section, we describe the design and implementation of the global navigation module. Its purpose is to compute a collision-free, geometrically optimal path for the Thymio robot, based on the environment reconstructed by the Vision Module.
