@@ -34,7 +34,7 @@ def main():
     print("A* global path:\n", path)
 
     # Global nav plot: map + polygons + A* path + empty odometry line
-    global_path, debug, fig, ax, odom_line, odom_arrow = setup_globalnav_plot(
+    global_path, debug, fig, ax, odom_line, odom_arrow, cam_line, cam_arrow = setup_globalnav_plot(
         coords,
         epsilon_mm=50.0,
         show_neighbors=False,
@@ -129,6 +129,26 @@ def main():
 
                 # TODO Camera acquisition
                 coords, theta = getVisionCoords(timeout=None, showDisplay=False)
+                # --- Update camera trajectory & arrow (green) ---
+                try:
+                    # camera measurement in world (mm)
+                    x_cam = coords[4][3]
+                    y_cam = coords[4][4]
+
+                    # 1) camera trajectory line
+                    xs_cam, ys_cam = cam_line.get_data()
+                    xs_cam = list(xs_cam) + [x_cam]
+                    ys_cam = list(ys_cam) + [y_cam]
+                    cam_line.set_data(xs_cam, ys_cam)
+
+                    # 2) camera arrow (using camera heading 'theta' from vision)
+                    x_head_cam = x_cam + ARROW_LENGTH * np.cos(theta)
+                    y_head_cam = y_cam + ARROW_LENGTH * np.sin(theta)
+                    cam_arrow.set_positions((x_cam, y_cam), (x_head_cam, y_head_cam))
+
+                except Exception as e:
+                    # if coords are not in the expected shape, just skip this frame
+                    print("Camera plotting error:", e)
 
                 # Run Kalman filter
 
@@ -155,10 +175,10 @@ def main():
                 # 2) Update odometry arrow
                 x = thymio.x
                 y = thymio.y
-                theta = thymio.theta
+                theta_est = thymio.theta
 
-                x_head = x + ARROW_LENGTH * np.cos(theta)
-                y_head = y + ARROW_LENGTH * np.sin(theta)
+                x_head = x + ARROW_LENGTH * np.cos(theta_est)
+                y_head = y + ARROW_LENGTH * np.sin(theta_est)
                 odom_arrow.set_positions((x, y), (x_head, y_head))
 
                 fig.canvas.draw()
