@@ -4,7 +4,7 @@ import numpy as np
 import math
 import time
 
-# CONFIG / CONSTANTS
+# CONSTANTS
 # ===========================================================
 ROBOT_ID = 8
 GOAL_ID = 9
@@ -137,7 +137,7 @@ def drawObstacles(canvas, obstacles):
     return canvas
 
 
-# HOMOGRAPHY HELPERS (A0 SHEET WORLD FRAME)
+# HOMOGRAPHY HELPERS (A0 SHEET)
 # ============================================================
 
 def computeHomography(zone):
@@ -268,7 +268,7 @@ class Obstacle:
         return {"contour": self.contour.tolist(), "area": self.area, "vertices": self.verts}
 
 
-def detectObstacles(frame, zone, minArea=4000, maxArea=50000):
+def detectObstacles(frame, zone, minArea=500, maxArea=50000):
     """
     Detect colored obstacles with optimized processing pipeline.
     """
@@ -286,8 +286,8 @@ def detectObstacles(frame, zone, minArea=4000, maxArea=50000):
 
     blurred = cv2.GaussianBlur(frame, (5, 5), 0)
 
-    lowerObs = np.array([80, 70, 20])
-    upperObs = np.array([180, 170, 110])
+    lowerObs = np.array([60, 60, 30])
+    upperObs = np.array([150, 150, 100])
     mask = cv2.inRange(blurred, lowerObs, upperObs)
 
     mask = cv2.bitwise_and(mask, zoneMask)
@@ -317,7 +317,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
         coords: numpy array [type, id, label, x, y] in A0 mm
         robotThetaWorld: float angle in radians in A0 world frame, or None
     """
-    bufferLen = 15
+    bufferLen = 100
     coordBuf = []
     camera = None
 
@@ -369,6 +369,20 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         (255, 255, 255),
                         thickness=-1,
                     )
+                
+                if GOAL_ID in centerMap and GOAL_ID in cornerMap:
+                    gx, gy = centerMap[GOAL_ID]
+                    goalCorners = cornerMap[GOAL_ID].astype(np.int32)
+                    xg, yg, wg, hg = cv2.boundingRect(goalCorners)
+                    radius_g = int(0.7 * max(wg, hg))
+
+                    cv2.circle(
+                        obsFrame,
+                        (int(gx), int(gy)),
+                        radius_g,
+                        (255, 255, 255),
+                        thickness=-1,
+                    )
 
                 # Robot orientation in world frame
                 if (ROBOT_ID in centerMap) and (H is not None) and (ROBOT_ID in cornerMap):
@@ -384,7 +398,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
 
                 obstacles = []
                 if zone.get("isComplete"):
-                    obstacles = detectObstacles(obsFrame, zone, minArea=1000)
+                    obstacles = detectObstacles(obsFrame, zone, minArea=500)
 
                 if showDisplay:
                     if zone.get("isComplete") and zone.get("corners"):
@@ -521,7 +535,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
                 )
 
         if obstacles is None:
-            obstacles = detectObstacles(frame, zone, minArea=1000)
+            obstacles = detectObstacles(frame, zone, minArea=500)
         if obstacles is None:
             obstacles = []
 
