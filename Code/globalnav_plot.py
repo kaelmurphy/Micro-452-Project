@@ -208,6 +208,16 @@ def setup_globalnav_plot(
                          alpha=0.9,
                          zorder=12,
                          label="Odometry trajectory")
+    
+    # ---------------------------------------------------------
+    # Camera trajectory (empty initially, updated live)
+    # ---------------------------------------------------------
+    cam_line, = ax.plot([], [],
+                        color="green",
+                        linewidth=1.8,
+                        alpha=0.9,
+                        zorder=13,
+                        label="Camera trajectory")
 
     # ---------------------------------------------------------
     # Odometry arrow (current robot pose & heading)
@@ -229,6 +239,21 @@ def setup_globalnav_plot(
         zorder=20,
     )
     ax.add_patch(odom_arrow)
+
+    # ---------------------------------------------------------
+    # Camera arrow (camera pose & heading)
+    # ---------------------------------------------------------
+    cam_arrow = FancyArrowPatch(
+        posA=(x0, y0),
+        posB=(x0, y0),  # start with zero length; will be updated from vision
+        arrowstyle="->",
+        mutation_scale=15,
+        color="green",
+        linewidth=2.0,
+        zorder=21,
+    )
+    ax.add_patch(cam_arrow)
+
 
     # ---------------------------------------------------------
     # Start and goal
@@ -298,7 +323,10 @@ def setup_globalnav_plot(
             Line2D([], [], color="black", linewidth=0.6, label="Visibility edges")
         )
     legend_elements.append(
-        Line2D([], [], color="blue", linewidth=1.8, label="Odometry trajectory")
+        Line2D([], [], color="blue", linewidth=1.8, label="Odometry")
+    )
+    legend_elements.append(
+        Line2D([], [], color="green", linewidth=1.8, label="Camera")
     )
 
     # Epsilon info (text-only entry)
@@ -321,4 +349,4 @@ def setup_globalnav_plot(
     plt.ion()
     fig.show()
 
-    return global_path, debug, fig, ax, odom_line, odom_arrow
+    return global_path, debug, fig, ax, odom_line, odom_arrow, cam_line, cam_arrow
