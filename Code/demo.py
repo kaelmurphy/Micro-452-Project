@@ -1,30 +1,40 @@
 import numpy as np
 import pandas as pd
-import cv2
 from matplotlib import pyplot as plt
 from enum import Enum
 from tdmclient import aw
-
 from localnav import *
 from globalnav import *
-from globalnav_plot import setup_globalnav_plot
+from Kalman import *
+from globalnav_plot import setup_globalnav_plot, ARROW_LENGTH
 from vision import getVisionCoords
 
 def main():
 
-    SIMULATION_MODE = True
+    # Settings
+    NO_THYMIO_MODE = False
+    NO_CAMERA_MODE = False
+    SAMPLE_PERIOD = 0.2
+    Q = np.diag([0.005, 0.005, 0.002])
+    R_cam = np.diag([0.002, 0.002, 0.0005])
+    P = np.diag([1.0, 1.0, 0.5])
+    TARGET_TOLERANCE = 10
 
-    # Find optimal path
-    theta0 = 0.0  # Initial orientation in radians
-    coords, theta1 = getVisionCoords(timeout=None, showDisplay=True)
-    print(coords, "radians: {:.2f}".format(theta1))
-    # df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
-    # map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
+    # Capture first image
+    if NO_CAMERA_MODE:
+        df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
+        coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
+        theta0 = 0
+    else:
+        coords, theta0 = getVisionCoords(timeout=None, showDisplay=True)
+        print(coords, "Initial orientation: {:.2f}".format(theta0))
+
+    # Compute best path
     path = compute_global_path(coords, epsilon_mm=50.0)
     print("A* global path:\n", path)
 
     # Global nav plot: map + polygons + A* path + empty odometry line
-    path, debug, fig_nav, ax_nav, odom_line = setup_globalnav_plot(
+    global_path, debug, fig, ax, odom_line, odom_arrow = setup_globalnav_plot(
         coords,
         epsilon_mm=50.0,
         show_neighbors=False,
@@ -34,7 +44,7 @@ def main():
     # ---------------------------------------------------------
     # SIMULATION-ONLY MODE (NO THYMIO)
     # ---------------------------------------------------------
-    if SIMULATION_MODE:
+    if NO_THYMIO_MODE:
         print("SIMULATION MODE ENABLED - no Thymio, showing static map + arrow.")
         plt.ioff()
         plt.show()
@@ -59,7 +69,6 @@ def main():
         # Initialize state machine
         thymio.set_target(path[1][0], path[1][1])
         state: State = State.FOLLOW
-        TARGET_TOLERANCE = 10 # mm
 
         # Until path is completed
         try:
@@ -118,13 +127,16 @@ def main():
                                 state = State.PROBE_OBSTACLE
 
                 # Pace loop at 200 ms
-                aw(thymio.client.sleep(0.2))
+                aw(thymio.client.sleep(SAMPLE_PERIOD))
 
                 # TODO Camera acquisition
-                # TODO Kalman filter
-                # TODO Update position with new estimation
-                # thymio.set_pose(path[0][0], path[0][1], theta0)
-                # thymio.set_target(path[1][0], path[1][1])
+
+                # Run Kalman filter
+                x_prev = np.array([thymio.x, thymio.y, thymio.theta])
+                x_new, P = ekf_step(x_prev, P, thymio.v, thymio.omega, 0, 0, SAMPLE_PERIOD, Q, R_cam)
+
+                # Update position with new estimation
+                thymio.set_pose(x_new[0], x_new[1], x_new[2])
                 
                 # -------------------------------------------------
                 # UPDATE MATPLOTLIB PLOT (ODOMETRY + ARROW)
@@ -146,7 +158,7 @@ def main():
 
                 fig.canvas.draw()
                 fig.canvas.flush_events()
-                plt.pause(0.01)   # increase to 0.2–0.5 if you want slower animation
+                # plt.pause(0.01)   # increase to 0.2–0.5 if you want slower animation
 
         
         finally:
@@ -161,26 +173,3 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         pass
-
-    """
-            # Update main navigation plot
-            xs, ys = odom_line.get_data()
-            xs = list(xs) + [thymio.x]
-            ys = list(ys) + [thymio.y]
-            odom_line.set_data(xs, ys)
-
-            # Update odometry arrow based on thymio pose
-            x = thymio.x
-            y = thymio.y
-            theta = thymio.theta
-
-            x_head = x + ARROW_LENGTH * np.cos(theta)
-            y_head = y + ARROW_LENGTH * np.sin(theta)
-            odom_arrow.set_positions((x, y), (x_head, y_head))
-
-            fig_nav.canvas.draw()
-            fig_nav.canvas.flush_events()
-
-    plt.ioff()
-    plt.show()
-"""
