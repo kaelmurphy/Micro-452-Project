@@ -9,7 +9,6 @@ from globalnav_plot import setup_globalnav_plot, ARROW_LENGTH
 from time import perf_counter
 from vision import getVisionCoords
 from threading import Thread
-from time import sleep
 
 # Testing settings
 
