@@ -19,7 +19,7 @@ NO_CAMERA_MODE = True
 # Navigation settings (mm)
 
 GLOB_NAV_EPSILON = 65
-ERROR_TOLERANCE = 30
+ERROR_TOLERANCE = 15
 
 # Kalman settings
 
