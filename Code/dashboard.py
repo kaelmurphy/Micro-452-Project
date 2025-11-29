@@ -28,6 +28,8 @@ from Kalman import ekf_step, wrap_angle  # uses your EKF implementation
 
 CSV_PATH = "globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv"
 
+BOARD_WIDTH_MM  = 1255.0   # your paper width in mm
+BOARD_HEIGHT_MM = 740.0    # your paper height in mm
 
 # ----------------------------------------------------------------------
 # DASHBOARD SETUP
@@ -123,6 +125,40 @@ def setup_dashboard(
         pts_pix = cv2.perspectiveTransform(pts_world, H_inv)  # shape (1,1,2)
         px, py = pts_pix[0, 0]
         return float(px), float(py)
+
+    # ------------------------------------------------------------------
+    # CROP / ZOOM CAMERA VIEW TO BOARD USING H_inv
+    # ------------------------------------------------------------------
+    # World corners of the board in mm
+    board_world = np.array(
+        [
+            [0.0,             0.0],
+            [BOARD_WIDTH_MM,  0.0],
+            [BOARD_WIDTH_MM,  BOARD_HEIGHT_MM],
+            [0.0,             BOARD_HEIGHT_MM],
+        ],
+        dtype=np.float32
+    ).reshape(-1, 1, 2)
+
+    # Map those world corners to pixel coordinates with H_inv
+    board_pix = cv2.perspectiveTransform(board_world, H_inv).reshape(-1, 2)
+
+    x_min_pix = board_pix[:, 0].min()
+    x_max_pix = board_pix[:, 0].max()
+    y_min_pix = board_pix[:, 1].min()
+    y_max_pix = board_pix[:, 1].max()
+
+    # Optional: add a small pixel margin so the markers are not cut off
+    margin = 10
+    x_min_pix -= margin
+    x_max_pix += margin
+    y_min_pix -= margin
+    y_max_pix += margin
+
+    # Set camera axes limits so we only see the paper region
+    ax_cam.set_xlim(x_min_pix, x_max_pix)
+    ax_cam.set_ylim(y_max_pix, y_min_pix)  # note: y inverted
+
 
     # Map all path points to pixel coords
     px_list = []
