@@ -268,7 +268,7 @@ class Obstacle:
         return {"contour": self.contour.tolist(), "area": self.area, "vertices": self.verts}
 
 
-def detectObstacles(frame, zone, minArea=500, maxArea=50000):
+def detectObstacles(frame, zone, minArea=400, maxArea=50000):
     """
     Detect colored obstacles with optimized processing pipeline.
     """
@@ -317,7 +317,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
         coords: numpy array [type, id, label, x, y] in A0 mm
         robotThetaWorld: float angle in radians in A0 world frame, or None
     """
-    bufferLen = 100
+    bufferLen = 15
     coordBuf = []
     camera = None
 
@@ -399,7 +399,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
 
                 obstacles = []
                 if zone.get("isComplete"):
-                    obstacles = detectObstacles(obsFrame, zone, minArea=500)
+                    obstacles = detectObstacles(obsFrame, zone, minArea=400)
 
                 if showDisplay:
                     if zone.get("isComplete") and zone.get("corners"):
@@ -536,7 +536,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
                 )
 
         if obstacles is None:
-            obstacles = detectObstacles(frame, zone, minArea=500)
+            obstacles = detectObstacles(frame, zone, minArea=400)
         if obstacles is None:
             obstacles = []
 

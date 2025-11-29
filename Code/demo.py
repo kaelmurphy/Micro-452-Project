@@ -14,8 +14,7 @@ from threading import Thread
 NO_THYMIO_MODE = False
 NO_CAMERA_MODE = True
 
-# Navigation settings (mm)
-
+# Thymio calibration settings
 GLOB_NAV_EPSILON = 65
 ERROR_TOLERANCE = 15
 
