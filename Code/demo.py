@@ -217,6 +217,11 @@ def main_thread() -> None:
     cam_arrow       = handles["cam_arrow"]
     cam_circle_map  = handles["cam_circle_map"]
 
+    ax_cov          = handles["ax_cov"]
+    ax_err          = handles["ax_err"]
+    line_sigx, line_sigy, line_sigtheta = handles["cov_lines"]
+    err_line        = handles["err_line"]
+
     path = global_path.copy()
     print("A* global path:\n", path)
 
@@ -243,6 +248,15 @@ def main_thread() -> None:
     # Run until window is closed
 
     closed = False
+
+    #histories for right-hand plots
+    t0 = perf_counter()
+    t_hist = []
+    sigx_hist = []
+    sigy_hist = []
+    sigtheta_hist = []
+    err_hist = []
+
 
     def on_close(event):
         nonlocal closed
@@ -341,6 +355,32 @@ def main_thread() -> None:
         x_head = x + ARROW_LENGTH * np.cos(theta_est)
         y_head = y + ARROW_LENGTH * np.sin(theta_est)
         odom_arrow.set_positions((x, y), (x_head, y_head))
+
+        # ---------- UPDATE COVARIANCE PLOT (top-right) ----------
+        t_rel = perf_counter() - t0
+        t_hist.append(t_rel)
+
+        # P is global and updated inside thymio_thread by ekf_step(...)
+        # We assume P is a 3x3 numpy array.
+        sigx_hist.append(P[0, 0])
+        sigy_hist.append(P[1, 1])
+        sigtheta_hist.append(P[2, 2])
+
+        line_sigx.set_data(t_hist, sigx_hist)
+        line_sigy.set_data(t_hist, sigy_hist)
+        line_sigtheta.set_data(t_hist, sigtheta_hist)
+        ax_cov.relim()
+        ax_cov.autoscale_view()
+
+        # ---------- UPDATE ERROR PLOT (odom vs camera, bottom-right) ----------
+        pos_odom = np.array([thymio.x, thymio.y])
+        pos_cam  = np.array([camPose[0], camPose[1]])
+        err_val = np.linalg.norm(pos_odom - pos_cam)   # [mm]
+        err_hist.append(err_val)
+
+        err_line.set_data(t_hist, err_hist)
+        ax_err.relim()
+        ax_err.autoscale_view()
 
         # Update figure
 
