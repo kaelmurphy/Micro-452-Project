@@ -84,11 +84,19 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                 case State.FOLLOW:
                     if np.linalg.norm([path[1][0] - thymioPose[0], path[1][1] - thymioPose[1]]) < ERROR_TOLERANCE:
                         if path.shape[0] > 2:
+                            previousWaypoint = path[0]
                             path = path[1:]
                             thymio.set_target(path[1][0], path[1][1])
                         else:
                             state = State.END
                     elif thymio.is_blocked():
+                        avoidancePath = path
+                        avoidancePath[0] = thymioPose[:2]
+                        if path.shape[0] == 2:
+                            directionPath = np.insert(path, 0, previousWaypoint, axis=0)
+                            thymio.set_avoidance_direction(trajectory_direction(directionPath))
+                        else:
+                            thymio.set_avoidance_direction(trajectory_direction(path))
                         thymio.probe_obstacle(path)
                         state = State.FACE_AWAY
 
@@ -110,8 +118,8 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                         THYMIO_LENGTH = 110
                         x = int(thymioPose[0] + THYMIO_LENGTH * np.cos(thymioPose[2]))
                         y = int(thymioPose[1] + THYMIO_LENGTH * np.sin(thymioPose[2]))
-                        segment = np.array([[thymioPose[0], thymioPose[1]], [x, y]])
-                        intersect, index = path_intersection_point(path, segment)
+                        nextMoveLine = np.array([[thymioPose[0], thymioPose[1]], [x, y]])
+                        intersect, index = path_intersection_point(avoidancePath, nextMoveLine)
                         if index is not None:
                             thymio.set_target(intersect[0], intersect[1])
                         else:
