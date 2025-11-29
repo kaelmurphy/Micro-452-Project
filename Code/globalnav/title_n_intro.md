@@ -1,6 +1,4 @@
-
 # **MOBILE ROBOTS Project Report**
-
 **Group 38**
 
 | **Name** | **ID / Student Number** | **Email** |
@@ -59,11 +57,12 @@ The final environment therefore consists of:
 - 4 convex polygonal obstacles (global, static)  
 - A start and goal, each represented by an ArUco marker  
 - Local obstacles, represented by white cylinders with helmets  
+This is illusrtated in *Figure 02*.
+<p align="center">
+  <img src="images/Setup_real_life.png" width="100%">
+</p>
+**Figure 02:** Showing real map (B) and close-up picture of the obstacles in (A).
 
-*INSERT IMAGE 02 HERE* 
-*IMAGE SHOWING REAL MAP AND CLOSE-UP OF OBSTACLES GLOB AND LOC*
-
-**Figure 02:** *INSERT CAPTION HERE*
 ---
 Next, we provide a detailed description of each of the five project modules.
 

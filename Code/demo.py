@@ -6,7 +6,7 @@ from globalnav import *
 from Kalman import *
 from globalnav_plot import ARROW_LENGTH
 from time import perf_counter
-from vision2 import getVisionCoords, getRobotPositionMm
+from vision2 import getVisionCoords, getRobotPositionMm, getLiveFrameBGR
 from threading import Thread
 from dashboard import setup_dashboard
 import pandas as pd
@@ -15,17 +15,19 @@ import pandas as pd
 # Testing settings
 
 NO_THYMIO_MODE = False
-NO_CAMERA_MODE = True
+NO_CAMERA_MODE = False
 
 # Thymio calibration settings
-GLOB_NAV_EPSILON = 65
+GLOB_NAV_EPSILON = 90
 ERROR_TOLERANCE = 15
+NUDGE_LENGTH = 110
+SOFT_KIDNAPPING_THRESHOLD = 15
 
 # Kalman settings
 
 TS = 0.1
-Q = np.diag([0.005, 0.005, 0.002])
-R_cam = np.diag([0.002, 0.002, 0.0005])
+Q = np.diag([0.000001, 0.000001, 1.2e-2])
+R_cam = np.diag([0.0005, 0.0005, 0.0005])
 P = np.diag([1.0, 1.0, 0.5])
 
 # Globals
@@ -86,19 +88,26 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                 case State.FOLLOW:
                     if np.linalg.norm([path[1][0] - thymioPose[0], path[1][1] - thymioPose[1]]) < ERROR_TOLERANCE:
                         if path.shape[0] > 2:
+                            previousWaypoint = path[0]
                             path = path[1:]
                             thymio.set_target(path[1][0], path[1][1])
                         else:
                             state = State.END
                     elif thymio.is_blocked():
+                        avoidancePath = path
+                        avoidancePath[0] = thymioPose[:2]
+                        if path.shape[0] == 2:
+                            directionPath = np.insert(path, 0, previousWaypoint, axis=0)
+                            thymio.set_avoidance_direction(trajectory_direction(directionPath))
+                        else:
+                            thymio.set_avoidance_direction(trajectory_direction(path))
                         thymio.probe_obstacle(path)
                         state = State.FACE_AWAY
 
                 case State.FACE_AWAY:
                     if thymio.is_clear():
-                        THYMIO_LENGTH = 110
-                        x = int(thymioPose[0] + THYMIO_LENGTH * np.cos(thymioPose[2]))
-                        y = int(thymioPose[1] + THYMIO_LENGTH * np.sin(thymioPose[2]))
+                        x = int(thymioPose[0] + NUDGE_LENGTH * np.cos(thymioPose[2]))
+                        y = int(thymioPose[1] + NUDGE_LENGTH * np.sin(thymioPose[2]))
                         thymio.set_target(x, y)
                         state = State.EXIT_PATH
 
@@ -109,11 +118,10 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
                 case State.PROBE_OBSTACLE:
                     if thymio.is_clear():
-                        THYMIO_LENGTH = 110
-                        x = int(thymioPose[0] + THYMIO_LENGTH * np.cos(thymioPose[2]))
-                        y = int(thymioPose[1] + THYMIO_LENGTH * np.sin(thymioPose[2]))
-                        segment = np.array([[thymioPose[0], thymioPose[1]], [x, y]])
-                        intersect, index = path_intersection_point(path, segment)
+                        x = int(thymioPose[0] + NUDGE_LENGTH * np.cos(thymioPose[2]))
+                        y = int(thymioPose[1] + NUDGE_LENGTH * np.sin(thymioPose[2]))
+                        nextMoveLine = np.array([[thymioPose[0], thymioPose[1]], [x, y]])
+                        intersect, index = path_intersection_point(avoidancePath, nextMoveLine)
                         if index is not None:
                             thymio.set_target(intersect[0], intersect[1])
                         else:
@@ -127,7 +135,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                             thymio.set_target(path[1][0], path[1][1])
                             state = State.FOLLOW
                     else:
-                        if np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
+                        if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
                             thymio.probe_obstacle(path)
                             state = State.PROBE_OBSTACLE
 
@@ -138,10 +146,10 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
             # Update position only if off by more than 30 mm (avoid unnecessary rollback)
 
-            dx = np.abs(estimatedPose[0] - thymioPose[0])
-            dy = np.abs(estimatedPose[1] - thymioPose[1])
-            if dx > 30 or dy > 30:
-                thymio.set_pose(estimatedPose[0], estimatedPose[1], estimatedPose[2])
+            errorNorm = np.linalg.norm((np.round(estimatedPose[:2, 0]) - thymioPose[:2]))
+            if errorNorm > SOFT_KIDNAPPING_THRESHOLD:
+                print(f"Correcting position by ({errorNorm} mm)")
+                thymio.set_pose(estimatedPose[0][0], estimatedPose[1][0], estimatedPose[2][0])
 
         # Stop thymio
 
@@ -171,22 +179,27 @@ def main_thread() -> None:
         df = pd.read_csv("simulation.csv", sep=";")
         coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
         theta0 = 0
+        H_inv = np.eye(3, dtype=float)  # dummy, only used for mapping
 
     # Else capture first image
 
     else:
-        coords, theta0 = getVisionCoords(timeout=None, showDisplay=True)
+        coords, theta0, H = getVisionCoords(timeout=None, showDisplay=True)
         print(coords, "Initial orientation: {:.2f}".format(theta0))
-
+        #Calculate inverse homography for later use
+        H_inv = np.linalg.inv(H)
     # Compute best path
 
     handles = setup_dashboard(
     coords=coords,
     initial_theta=theta0,
     epsilon_mm=GLOB_NAV_EPSILON,
+    H_inv=H_inv,
     )
 
+
     fig             = handles["fig"]
+    img_artist      = handles["img_artist"]
     global_path     = handles["global_path"]
     odom_line       = handles["odom_line"]
     odom_arrow      = handles["odom_arrow"]
@@ -228,7 +241,19 @@ def main_thread() -> None:
 
     fig.canvas.mpl_connect('close_event', on_close)
 
+    log = 'time (s), cam_x (mm), cam_y (mm), cam_theta (rad), odom_x (mm), odom_y (mm), odom_theta (rad), v (mm/s), omega (rad/s), est_x (mm), est_y (mm), est_theta (rad)\n'
+
     while not closed:
+
+        # --- 1) Update live camera image on the left panel ---
+        try:
+            frame_bgr = getLiveFrameBGR()
+            if frame_bgr is not None:
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                img_artist.set_data(frame_rgb)
+        except RuntimeError:
+            # Vision not initialized or camera problem -> just skip
+            pass
 
         # Plot camera detected trajectory 
 
@@ -272,6 +297,11 @@ def main_thread() -> None:
         fig.canvas.draw()
         fig.canvas.flush_events()
         plt.pause(0.025)
+
+        log += f'{thymio.t}, {camPose[0]}, {camPose[1]}, {camPose[2]}, {thymio.x}, {thymio.y}, {thymio.theta}, {thymio.v}, {thymio.omega}\n'
+
+    with open('log.csv', 'w') as log_file:
+        log_file.write(log)
 
 if __name__ == '__main__':
 
