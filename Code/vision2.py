@@ -522,7 +522,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
                 isinstance(cornersWorld, (list, tuple, np.ndarray))
                 and len(cornersWorld) > 0
                 and hasattr(cornersWorld[0], "__iter__")
-            ):
+            ):   
                 for (x, y), polyId, label in zip(cornersWorld, cornerLabels, cornerNames):
                     coordList.append(["square", polyId, label, float(x), float(y)])
 
@@ -620,7 +620,7 @@ def getRobotPositionMm(showDisplay=False):
 
         if ROBOT_ID not in centerMap:
             time.sleep(0.01)
-            continue
+            return None, None, None, False
 
         # Robot position in world mm using cached homography
         robotWorld = pixelToWorld(centerMap[ROBOT_ID], VISION_H)
@@ -647,7 +647,7 @@ def getRobotPositionMm(showDisplay=False):
             cv2.imshow("Robot Tracking", dispFrame)
             cv2.waitKey(1)
 
-        return x_mm, y_mm, theta
+        return x_mm, y_mm, theta, True
 
 
 def stopVision():
@@ -660,6 +660,18 @@ def stopVision():
         VISION_CAMERA = None
     cv2.destroyAllWindows()
 
+def getLiveFrameBGR():
+    """
+    Return the latest BGR frame from the cached CameraStream started by
+    getVisionCoords(). Raises if vision hasn't been initialized.
+    """
+    global VISION_CAMERA
+    if VISION_CAMERA is None:
+        raise RuntimeError(
+            "Vision not initialized. Call getVisionCoords(...) once first "
+            "to lock in the zone and homography."
+        )
+    return VISION_CAMERA.read()
 
 # MAIN TEST HARNESS
 # ============================================================
