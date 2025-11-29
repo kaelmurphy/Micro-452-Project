@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
+from matplotlib.patches import Circle, FancyArrowPatch
 import cv2  # used only to draw a simple moving blob
 
 from globalnav_plot import setup_globalnav_plot, ARROW_LENGTH
@@ -89,7 +90,7 @@ def setup_dashboard(csv_path: str = CSV_PATH):
     # NOTE: if the layout looks weird, you may want to guard the
     # internal plt.subplots_adjust / plt.tight_layout calls in
     # setup_globalnav_plot so they only run when it creates the figure.
-    global_path, debug, fig_map, ax_map, odom_line, odom_arrow, cam_line, cam_arrow = setup_globalnav_plot(
+    global_path, debug, fig_map, ax_map, odom_line, odom_arrow, odom_circle_map, cam_line, cam_arrow, cam_circle_map = setup_globalnav_plot(
         coords,
         epsilon_mm=50.0,
         show_neighbors=False,
@@ -143,6 +144,53 @@ def setup_dashboard(csv_path: str = CSV_PATH):
     )
 
     # ------------------------------------------------------------------
+    # Camera-overlay: robot markers that sit on top of the left image
+    # We'll draw a small circle to represent the robot base and an arrow
+    # for heading for both odometry (blue) and camera (green).
+    # Choose reasonable pixel sizes for the demo.
+    ARROW_PIX = 40.0
+    CIRCLE_PIX_RADIUS = 8.0
+
+    # Use the first waypoint as initial pose for the overlay
+    if len(px_list) > 0:
+        initial_px, initial_py = px_list[0], py_list[0]
+    else:
+        initial_px, initial_py = cam_width / 2.0, cam_height / 2.0
+
+    # Odometry marker on camera overlay (blue)
+    odom_circle_cam = Circle((initial_px, initial_py), radius=CIRCLE_PIX_RADIUS,
+                             facecolor="none", edgecolor="blue",
+                             linewidth=1.6, zorder=30)
+    ax_cam.add_patch(odom_circle_cam)
+
+    odom_arrow_cam = FancyArrowPatch(
+        posA=(initial_px, initial_py),
+        posB=(initial_px + ARROW_PIX, initial_py),
+        arrowstyle="->",
+        mutation_scale=10,
+        color="blue",
+        linewidth=1.6,
+        zorder=31,
+    )
+    ax_cam.add_patch(odom_arrow_cam)
+
+    # Camera marker on camera overlay (green)
+    cam_circle_cam = Circle((initial_px, initial_py), radius=CIRCLE_PIX_RADIUS,
+                            facecolor="none", edgecolor="green",
+                            linewidth=1.6, zorder=30)
+    ax_cam.add_patch(cam_circle_cam)
+
+    cam_arrow_cam = FancyArrowPatch(
+        posA=(initial_px, initial_py),
+        posB=(initial_px + ARROW_PIX, initial_py),
+        arrowstyle="->",
+        mutation_scale=10,
+        color="green",
+        linewidth=1.6,
+        zorder=31,
+    )
+    ax_cam.add_patch(cam_arrow_cam)
+
     # RIGHT TOP: KALMAN COVARIANCE
     # ------------------------------------------------------------------
     ax_cov.set_title("Kalman covariance")
@@ -188,6 +236,14 @@ def setup_dashboard(csv_path: str = CSV_PATH):
         "world_to_pix": world_to_pix,
         "cov_lines": (line_sigx, line_sigy, line_sigtheta),
         "err_line": err_line,                         # NEW
+        # map-side circles (from setup_globalnav_plot)
+        "odom_circle_map": odom_circle_map,
+        "cam_circle_map": cam_circle_map,
+        # camera-overlay robot markers (pixel coords)
+        "odom_circle_cam": odom_circle_cam,
+        "cam_circle_cam": cam_circle_cam,
+        "odom_arrow_cam": odom_arrow_cam,
+        "cam_arrow_cam": cam_arrow_cam,
     }
 
 
@@ -341,6 +397,15 @@ def run_demo():
     odom_arrow  = handles["odom_arrow"]
     cam_line    = handles["cam_line"]
     cam_arrow   = handles["cam_arrow"]
+    world_to_pix = handles["world_to_pix"]
+    # map-side circles
+    odom_circle_map = handles["odom_circle_map"]
+    cam_circle_map = handles["cam_circle_map"]
+    # camera-overlay (pixel) markers
+    odom_circle_cam = handles["odom_circle_cam"]
+    cam_circle_cam = handles["cam_circle_cam"]
+    odom_arrow_cam = handles["odom_arrow_cam"]
+    cam_arrow_cam = handles["cam_arrow_cam"]
     ax_cov      = handles["ax_cov"]
     ax_err      = handles["ax_err"]          # NEW
     cam_width   = handles["cam_width"]
@@ -385,6 +450,26 @@ def run_demo():
     x_head0 = x0 + ARROW_LENGTH * np.cos(theta0)
     y_head0 = y0 + ARROW_LENGTH * np.sin(theta0)
     odom_arrow.set_positions((x0, y0), (x_head0, y_head0))
+
+    # initialize map-side circles
+    try:
+        odom_circle_map.center = (x0, y0)
+    except Exception:
+        # some backends have Circle with attribute 'center' writable
+        pass
+
+    try:
+        cam_circle_map.center = (x0, y0)
+    except Exception:
+        pass
+
+    # initialize camera-overlay markers
+    ARROW_PIX = 40.0
+    px0, py0 = world_to_pix(x0, y0)
+    odom_circle_cam.center = (px0, py0)
+    odom_arrow_cam.set_positions((px0, py0), (px0 + ARROW_PIX, py0))
+    cam_circle_cam.center = (px0, py0)
+    cam_arrow_cam.set_positions((px0, py0), (px0 + ARROW_PIX, py0))
 
     plt.ion()
     fig.show()
@@ -462,7 +547,39 @@ def run_demo():
             y_head = y_est_val + ARROW_LENGTH * np.sin(theta_est)
             odom_arrow.set_positions((x_est_val, y_est_val), (x_head, y_head))
 
-            # (We leave cam_line / cam_arrow unused here, but you have them.)
+            # Update map-side robot base circles and camera measurement arrow
+            try:
+                odom_circle_map.center = (x_est_val, y_est_val)
+            except Exception:
+                pass
+
+            try:
+                cam_circle_map.center = (z_cam[0], z_cam[1])
+                # update the on-map camera arrow to match camera-measured theta
+                x_head_cam_map = z_cam[0] + ARROW_LENGTH * np.cos(z_cam[2])
+                y_head_cam_map = z_cam[1] + ARROW_LENGTH * np.sin(z_cam[2])
+                cam_arrow.set_positions((z_cam[0], z_cam[1]), (x_head_cam_map, y_head_cam_map))
+            except Exception:
+                pass
+
+            # Update camera-overlay (pixel) markers
+            try:
+                px_est, py_est = world_to_pix(x_est_val, y_est_val)
+                px_cam_m, py_cam_m = world_to_pix(z_cam[0], z_cam[1])
+
+                # odometry marker on camera overlay
+                odom_circle_cam.center = (px_est, py_est)
+                px_head_est = px_est + ARROW_PIX * np.cos(theta_est)
+                py_head_est = py_est - ARROW_PIX * np.sin(theta_est)
+                odom_arrow_cam.set_positions((px_est, py_est), (px_head_est, py_head_est))
+
+                # camera measurement marker on overlay
+                cam_circle_cam.center = (px_cam_m, py_cam_m)
+                px_head_cam = px_cam_m + ARROW_PIX * np.cos(z_cam[2])
+                py_head_cam = py_cam_m - ARROW_PIX * np.sin(z_cam[2])
+                cam_arrow_cam.set_positions((px_cam_m, py_cam_m), (px_head_cam, py_head_cam))
+            except Exception:
+                pass
 
             # ----------------------------------------------------------
             # 6A) UPDATE COVARIANCE PLOT (RIGHT, top)

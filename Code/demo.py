@@ -192,7 +192,7 @@ def main_thread() -> None:
 
     # Global nav plot: map + polygons + A* path + empty odometry line
 
-    global_path, debug, fig, ax, odom_line, odom_arrow, cam_line, cam_arrow = setup_globalnav_plot(
+    global_path, debug, fig, ax, odom_line, odom_arrow, odom_circle_map, cam_line, cam_arrow, cam_circle_map = setup_globalnav_plot(
         coords,
         epsilon_mm=GLOB_NAV_EPSILON,
         show_neighbors=False,
@@ -244,11 +244,19 @@ def main_thread() -> None:
         x_head_cam = camPose[0] + ARROW_LENGTH * np.cos(camPose[2])
         y_head_cam = camPose[1] + ARROW_LENGTH * np.sin(camPose[2])
         cam_arrow.set_positions((camPose[0], camPose[1]), (x_head_cam, y_head_cam))
+        try:
+            cam_circle_map.center = (camPose[0], camPose[1])
+        except Exception:
+            pass
         
         # Plot odometry detected trajectory 
 
         xs, ys = odom_line.get_data()
         xs = list(xs) + [thymio.x]
+        try:
+            odom_circle_map.center = (thymio.x, thymio.y)
+        except Exception:
+            pass
         ys = list(ys) + [thymio.y]
         odom_line.set_data(xs, ys)
 
