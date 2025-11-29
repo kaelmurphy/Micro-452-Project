@@ -33,19 +33,19 @@ CSV_PATH = "globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv"
 # DASHBOARD SETUP
 # ----------------------------------------------------------------------
 
-def setup_dashboard(csv_path: str = CSV_PATH):
+def setup_dashboard(
+    coords: np.ndarray,
+    initial_theta: float = 0.0,
+    epsilon_mm: float = None,
+):
     """
-    Create the main figure and 3 subplots, initialize:
-      - simulated camera image on the left,
-      - map (via setup_globalnav_plot) in the center,
-      - empty covariance panel on the right.
-
-    Returns a bunch of handles you can use in an update loop.
+    ...
+    epsilon_mm : float
+        Obstacle inflation radius in mm, passed through to setup_globalnav_plot.
+        MUST be provided by the caller (e.g. GLOB_NAV_EPSILON from demo.py).
     """
-
-    # --- Load map from CSV, like in demo.py ---
-    df = pd.read_csv(csv_path, sep=";")
-    coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
+    if epsilon_mm is None:
+        raise ValueError("setup_dashboard: epsilon_mm must be provided (e.g. GLOB_NAV_EPSILON).")
 
     # --- Create figure and 3 panels using GridSpec ---
     fig = plt.figure(figsize=(19, 6))
@@ -90,15 +90,17 @@ def setup_dashboard(csv_path: str = CSV_PATH):
     # NOTE: if the layout looks weird, you may want to guard the
     # internal plt.subplots_adjust / plt.tight_layout calls in
     # setup_globalnav_plot so they only run when it creates the figure.
-    global_path, debug, fig_map, ax_map, odom_line, odom_arrow, odom_circle_map, cam_line, cam_arrow, cam_circle_map = setup_globalnav_plot(
+    global_path, debug, fig_map, ax_map, \
+    odom_line, odom_arrow, odom_circle_map, \
+    cam_line, cam_arrow, cam_circle_map = setup_globalnav_plot(
         coords,
-        epsilon_mm=50.0,
+        epsilon_mm=epsilon_mm,
         show_neighbors=False,
-        initial_theta=0.0,
+        initial_theta=initial_theta,
         fig=fig,
         ax=ax_map,
     )
-
+    
     # They should be the same figure
     # (this is more of a sanity check than a hard requirement)
     # fig_map is the same object as fig
@@ -386,7 +388,17 @@ def run_demo():
       - animates fake camera frames on the left,
       - moves a fake robot along the global path in the center.
     """
-    handles = setup_dashboard()
+    # For demo: load coords from CSV
+    df = pd.read_csv(CSV_PATH, sep=";")
+    coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
+
+    epsilon_demo = 50.0  # or any test value you like
+
+    handles = setup_dashboard(
+        coords=coords,
+        initial_theta=0.0,
+        epsilon_mm=epsilon_demo,
+    )
 
     fig         = handles["fig"]
     ax_cam      = handles["ax_cam"]
