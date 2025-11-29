@@ -146,10 +146,12 @@ class Thymio():
         y = int(np.round(y))
         aw(self.node.set_variables({'state': [0], 'r_x_mm': [x], 'r_y_mm': [y]}))
 
+    def set_avoidance_direction(self, direction: int) -> None:
+        self.avoidanceDirection = int(direction)
+
     def probe_obstacle(self, path: np.ndarray) -> None:
         self.clear = False
-        direction = trajectory_direction(path)
-        aw(self.node.set_variables({'state': [1], 'avoid_dir': [direction * 100]}))
+        aw(self.node.set_variables({'state': [1], 'avoid_dir': [self.avoidanceDirection * 100]}))
 
     def is_blocked(self) -> bool:
         blocked = self.blocked
