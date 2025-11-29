@@ -6,7 +6,7 @@ from globalnav import *
 from Kalman import *
 from globalnav_plot import setup_globalnav_plot, ARROW_LENGTH
 from time import perf_counter
-from vision import getVisionCoords
+from vision2 import getVisionCoords, getRobotPositionMm
 from threading import Thread
 
 # Testing settings
@@ -153,8 +153,8 @@ def camera_thread() -> None:
     
     while True:
 
-        coords, theta = getVisionCoords(timeout=None, showDisplay=False)
-        camPose = np.array([coords[4][3], coords[4][4], theta])
+        x_mm, y_mm, theta = getRobotPositionMm(showDisplay=False)
+        camPose = np.array([x_mm, y_mm, theta])
         newCamPose = True
 
 def main_thread() -> None:
