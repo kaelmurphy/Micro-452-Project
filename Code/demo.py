@@ -17,7 +17,7 @@ def main():
     print(coords, "radians: {:.2f}".format(theta1))
     # df = pd.read_csv("globalnav/CSV_Data/Simulation_Data_VG_V1.0_13.11.25.csv", sep=";")
     # map_array = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
-    path = compute_global_path(coords, epsilon_mm=50.0)
+    path = compute_global_path(coords, epsilon_mm=60.0)
     print("A* global path:\n", path)
 
     # Global nav plot: map + polygons + A* path + empty odometry line
