@@ -1,6 +1,14 @@
-# Local navigation
+# Motor control
+
+## Strategy
+
+To do motor control, two options are available on the thymio :
+- Do the control loop on the PC in Python
+- Do the control loop onboard 
 
 ## Odometry
+
+### Pose
 
 The Thymio robot in our use case has **3 DOF**, two translational and one rotational : $[x, y, \theta]^T$. The goal is to find the change in position over one time step :
 $$
@@ -37,7 +45,7 @@ $$
 
 ### Change in position
 
-To integrate the position, the **mid-point rule** also known as **Runge–Kutta 2** (**RK2**) is used. The idea is that the change of coordinate has mainly followed the mid-point heading.
+To integrate the position, we could consider the same geometrical setup as before, but it would be a bit computationally heavy, and would lead to special cases (i.e. radius at infinity when moving in a straight line). The **mid-point rule** also known as **Runge–Kutta 2** (**RK2**) is used instead. The idea is that the change of coordinate has mainly followed the mid-point heading.
 $$
 \begin{align}
 \theta_{mid} &= \theta + \frac{\Delta \theta}{2} \\
@@ -46,11 +54,11 @@ $$
 \end{align}
 $$
 
-## Units conversion
+## Integration
 
-### Distance integration
+### Change in wheel distance
 
-First, we solve the simple case of linear motion in the $x$ direction. From the Thymio cheat sheet we get the constants :
+First, we solve the simple case of linear motion for each wheel. From the Thymio cheat sheet we get the constants :
 $$
 \begin{equation}
 \begin{aligned}
@@ -76,14 +84,17 @@ $$
 \end{equation}
 $$
 
-After experimentation and calibration, it turns out that the given speeds in $mm/s$ and $lsb/s$ are not exact. The calibrated integration is closer to :
+After experimentation and calibration, it turns out that the given speeds in $mm/s$ and $lsb/s$ are not exact. The calibration constant found by trial and error is :
 $$
-\begin{equation}
-\Delta d_{\mu m} = v_{lsb/s} \cdot 3.1254 = v_{lsb/s} \cdot \frac{31'254}{10'000}
-\end{equation}
+\begin{align}
+\Delta d_{\mu m} = v_{lsb/s} \cdot 3.1254 \\
+k_d = 3.1254 \approx \frac{31'254}{10'000}
+\end{align}
 $$
 
-### Heading integration
+Which give a maximum speed closer to $15.6 \text{ cm/s}$.
+
+### Change in robot heading
 
 We computed earlier that we need to find the following angle increment :
 $$
@@ -99,12 +110,13 @@ $$
 
 If we try to deduce a constant with $p \approx 95'000 \, \mu m$ to compute angles in these units, we get :
 $$
-\begin{equation}
-\Delta \theta = \frac{\Delta d_R - \Delta d_L}{p} \, rad = (\Delta d_R - \Delta d_L) \cdot \frac{2^{15}}{\pi \cdot p} \approx (\Delta d_R - \Delta d_L) \cdot \frac{1098}{10000}
-\end{equation}
+\begin{align}
+\Delta \theta &= \frac{\Delta d_R - \Delta d_L}{p} \, rad \approx (\Delta d_R - \Delta d_L) \cdot \frac{2^{15}}{\pi \cdot p} \\
+k_\theta &\approx \frac{2^{15}}{\pi \cdot p} \approx \frac{10'430}{95'000} \approx \frac{1098}{10000}
+\end{align}
 $$
 
-## Control
+## Controller
 
 ### Astolfi
 
@@ -117,7 +129,7 @@ $$
 \end{align}
 $$
 
-Here $\rho$ is the distance to the target, $\alpha$ the robot to target heading error, and $\beta$ the final target heading error. The control law is :
+With $\rho$ is the distance to the target, $\alpha$ the target heading error, and $\beta$ the end heading error. The control law is :
 $$
 \begin{align}
 v &= k_\rho \cdot \rho \\
@@ -126,11 +138,11 @@ k_\rho &> 0, k_\beta < 0, k_\alpha - k_\rho > 0
 \end{align}
 $$
 
-This controller offer a nice spline motion, but it gets numerically unstable as the robot reach the goal. When $(\Delta x, \Delta y) \rightarrow (0, 0)$, the function $\text{atan2}$ tends to jump around, and the angles $\alpha$ and $\beta$ tends to fight for angular velocity.
+This controller works fine, but it tends to move in big arcs before getting to the target, which is not optimal in a tight environnement.
 
-### Custom controller
+### Tweaked astolfi
 
-To fix this the controller is simplified. Only the distance error $e$ and the target heading error $\varepsilon$ are used :
+To fix this the controller must be changed a little. The end heading error $\beta$ is not needed, so it is removed. Then, to make clear that this is a different controller, $\rho$ is renamed as $e$ and $\alpha$ becomes $\varepsilon$ :
 $$
 \begin{align}
 e &= \sqrt{\Delta x^2 + \Delta y^2} \\
@@ -138,19 +150,31 @@ e &= \sqrt{\Delta x^2 + \Delta y^2} \\
 \end{align}
 $$
 
+Then we limit the domain of definition such that $e \in [0, e_{max}]$.
+
+$$
+\begin{equation}
+e \rightarrow \begin{cases}
+0 &\text{ if } e < 0 \\
+e &\text{ if } 0 < e \leq e_{max} \\
+e_{max} &\text{ else}
+\end{cases}
+\end{equation}
+$$
+
 Then, assuming $e \in [0, e_{max}]$ and $\varepsilon \in [-\pi, \pi[$, the controller is modified as :
 $$
 \begin{align}
 v &= k_e \cdot e \cdot (\pi - |\varepsilon|) \\
-\omega &= k_\omega \cdot \varepsilon \cdot (e_{max} - e)
+\omega &= k_\varepsilon \cdot \varepsilon
 \end{align}
 $$
 
-This way, the $v$ tends to $0$ if the robot is not heading in the right direction, and $\omega$ tends to $0$ when the target reaches the goal. This prevents the robot from going forward while the target is not in sight, and spinning around when the target is reached.
+This **prevents the robot from moving** forward **until it's headed in the right direction**. Then the robot will move at **constant speed** before reaching $e_{max}$, from which it will act as a classic P controller. The speed PI controller will take care of the **soft start** while the position P controller does the **soft stop**.
 
-## Obstacle avoidance
+# Local avoidance
 
-### Strategy
+## Strategy
 
 The custom controller follows the path **one waypoint at a time**.
 
@@ -158,7 +182,7 @@ The custom controller follows the path **one waypoint at a time**.
     <img src="local-nav-path-following.png" alt="path-following" width="200"/>
 </p>
 
-Knowing the path was generated with a visibility graph, we can assume each vertex is quite close to an exclusion zone. The avoidance should hence be done on the **path exterior** :
+Knowing the path was generated with a visibility graph, we can assume each vertex is close to an exclusion zone. The avoidance should hence be done on the **path exterior** :
 
 <p align="center">
     <img src="local-nav-avoidance-strategy.png" alt="avoidance-strategy" width="200"/>
@@ -170,7 +194,7 @@ When detecting the obstacle with the horizontal proximity sensors, the avoidance
     <img src="local-nav-potential-field.png" alt="potential-field" width="400"/>
 </p>
 
-### State machine
+## State machine
 
 The proximity sensors being far ahead of the rotation center of the robot, directly implementing a potential field often lead to the robot to touch the obstacle while trying to avoid it. To prevent this, the robot should **probe** for the obstacle **tangeant**, then **nudge one robot length**. It should repeat these two steps until the nudge step intersect with the original path.
 

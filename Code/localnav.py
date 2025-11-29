@@ -43,25 +43,30 @@ class Calibration():
 
 class Thymio():
 
-    def __init__(self, calibration: Calibration) -> None:
+    def __init__(self, x0: float, y0: float, theta0: float, calibration: Calibration) -> None:
         
         # Thymio client
         self.client: ClientAsync = ClientAsync()
         self.node: ClientAsyncNode = None
 
+        # Initial pose
+        self.x = int(np.round(x0))
+        self.y = int(np.round(y0))
+        self.theta = int(np.round(32767 * theta0 / np.pi))
+
         # Calibration and program
         self.cal = calibration
         with open('thymio.aesl') as file:
             self.program = file.read().format(
+                X0 = self.x,
+                Y0 = self.y,
+                THETA0 = self.theta,
                 SCALE = self.cal.scale,
                 TRACK = self.cal.track
             )
 
-        # Robot state
+        # Initial commands
         self.t: float = 0
-        self.x: int = 0
-        self.y: int = 0
-        self.theta: float = 0
         self.v: int = 0
         self.omega: float = 0
 
@@ -98,6 +103,12 @@ class Thymio():
         error = aw(self.node.run())
         if error is not None:
             raise RuntimeError(f'Error {error['error_code']}')
+    
+        # Pump old events
+        while self.t > 1.0:
+            aw(self.client.sleep(0.01))
+
+        # Return object
         return self
 
     def __exit__(self, type, value, traceback) -> None:
@@ -124,10 +135,10 @@ class Thymio():
                 self.clear = True
 
     def set_pose(self, x: float, y: float, theta: float) -> None:
-        x = int(np.round(x))
-        y = int(np.round(y))
-        theta = int(np.round(32767 * theta / np.pi))
-        aw(self.node.set_variables({'x_mm': [x], 'y_mm': [y], 'theta': [theta]}))
+        self.x = int(np.round(x))
+        self.y = int(np.round(y))
+        self.theta = int(np.round(32767 * theta / np.pi))
+        aw(self.node.set_variables({'x_mm': [self.x], 'y_mm': [self.y], 'theta': [self.theta]}))
 
     def set_target(self, x: float, y: float) -> None:
         self.blocked = False
