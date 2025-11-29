@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch, FancyArrowPatch
+from matplotlib.patches import Patch, FancyArrowPatch, Circle
 
 from globalnav import compute_global_path_with_debug
 
@@ -240,6 +240,11 @@ def setup_globalnav_plot(
     )
     ax.add_patch(odom_arrow)
 
+    # Small circle for the odometry robot base (so arrow is clearly attached)
+    odom_circle = Circle((x0, y0), radius=30.0, facecolor="none",
+                         edgecolor="blue", linewidth=1.8, zorder=19)
+    ax.add_patch(odom_circle)
+
     # ---------------------------------------------------------
     # Camera arrow (camera pose & heading)
     # ---------------------------------------------------------
@@ -253,6 +258,11 @@ def setup_globalnav_plot(
         zorder=21,
     )
     ax.add_patch(cam_arrow)
+
+    # Small circle for the camera robot base (on-map camera measurement)
+    cam_circle = Circle((x0, y0), radius=30.0, facecolor="none",
+                        edgecolor="green", linewidth=1.8, zorder=19)
+    ax.add_patch(cam_circle)
 
 
     # ---------------------------------------------------------
@@ -349,4 +359,15 @@ def setup_globalnav_plot(
     plt.ion()
     fig.show()
 
-    return global_path, debug, fig, ax, odom_line, odom_arrow, cam_line, cam_arrow
+    return (
+        global_path,
+        debug,
+        fig,
+        ax,
+        odom_line,
+        odom_arrow,
+        odom_circle,
+        cam_line,
+        cam_arrow,
+        cam_circle,
+    )
