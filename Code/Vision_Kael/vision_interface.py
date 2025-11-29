@@ -1,8 +1,3 @@
-"""
-ArUco Vision System - External Integration Interface
-Simple interface for getting coordinate data from the vision system.
-"""
-
 import sys
 import os
 import time
@@ -10,11 +5,18 @@ import numpy as np
 import cv2
 
 # Add src directory to path
-_src_path = os.path.join(os.path.dirname(__file__), 'src')
-if _src_path not in sys.path:
-    sys.path.insert(0, _src_path)
+# _src_path = os.path.join(os.path.dirname(__file__), 'src')
+# if _src_path not in sys.path:
+#     sys.path.insert(0, _src_path)
 
-def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True):
+from .src import camera_setup
+from .src import aruco_utils
+from .src import coord_utils
+from .src import obstacle
+from .src import feed_processing
+from .src import draw_utils
+
+def getCoordinatesFromVision(timeout=None, show_display=True):
     """
     Get coordinate data from the vision system.
     
@@ -27,24 +29,19 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
         numpy array with columns [type, id, label, x, y]
         Empty array if failed or timeout
     """
-    def coords_are_similar(arr1, arr2, tol=10.0):
+    def coords_are_similar(arr1, arr2, tol=20.0):
         if arr1.shape != arr2.shape:
             return False
         # Only compare x_mm and y_mm columns (last two columns)
         xy1 = arr1[:, -2:].astype(float)
         xy2 = arr2[:, -2:].astype(float)
         return np.all(np.abs(xy1 - xy2) < tol)
-    bufferLen = 15  # Require 15 stable frames for robust output
+    bufferLen = 3  # Require 3 stable frames for robust output
     coordsBuffer = []
     camera = None
     try:
         # Import inside function to avoid linting issues
-        from src import camera_setup
-        from src import aruco_utils
-        from src import coord_utils
-        from src import obstacle
-        from src import feed_processing
-        from src import draw_utils
+        
 
         ROBOT_ID = 8
         GOAL_ID = 9
@@ -73,7 +70,6 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
 
             display_frame = frame.copy()
             try:
-                from src import aruco_utils, draw_utils, obstacle, feed_processing
                 ids, centers, cornersMap, _ = aruco_utils.detectAruco(frame)
                 zone = aruco_utils.buildOperatingZone(centers)
                 originPx = centers.get(ORIGIN_ID)
@@ -87,7 +83,7 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
                     if GOAL_ID in centers:
                         draw_utils.drawGoalMarker(display_frame, centers[GOAL_ID])
                     if zone.get('isComplete'):
-                        obstacles = obstacle.detectObstacles(frame, zone, minArea=2500)
+                        obstacles = obstacle.detectObstacles(frame, zone, minArea=1000)
                         if obstacles:
                             display_frame = obstacle.drawObstacles(display_frame, obstacles, cornersMap, originPx, False, False)
                     cv2.imshow('Vision System', display_frame)
@@ -99,8 +95,7 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
 
                 # Always extract and return coordinates in mm
                 coords = _extractCoordinatesFromFrame(frame, centers, cornersMap, zone, originPx)
-                # ...existing code...
-
+                print(coords)
                 # Only start stabilization if all required elements are detected
                 types = coords[:,0] if coords.size > 0 else []
                 has_corners = np.sum(types == 'corner') >= 4
@@ -108,7 +103,7 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
                 has_goal = np.any(types == 'goal')
                 has_obstacle = np.any(types == 'obstacle')
                 # For obstacles, compare by obstacle index and vertices
-                def obstacles_are_similar(obs_arr1, obs_arr2, tol=20.0):
+                def obstacles_are_similar(obs_arr1, obs_arr2, tol=50.0):
                     if len(obs_arr1) != len(obs_arr2):
                         return False
                     for row1, row2 in zip(obs_arr1, obs_arr2):
@@ -119,7 +114,6 @@ def getCoordinatesFromVision(timeout=None, stabilityFrames=60, show_display=True
                         if abs(x1 - x2) > tol or abs(y1 - y2) > tol:
                             return False
                     return True
-
                 if coords.size > 0 and has_corners and has_robot and has_goal and has_obstacle:
                     # Separate obstacle rows for comparison
                     obstacle_rows = [row for row in coords if row[0] == 'obstacle']
@@ -177,11 +171,6 @@ def _statesAreSimilar(state1, state2, tolerance=10):
 
 def _extractCoordinatesFromFrame(frame, centers, cornersMap, zone, originPx):
     """Extract all coordinates from a stable frame."""
-    # Import modules inside function
-    from src import coord_utils
-    from src import feed_processing
-    from src import obstacle
-    from src import draw_utils
     
     ROBOT_ID = 8
     GOAL_ID = 9
@@ -190,28 +179,24 @@ def _extractCoordinatesFromFrame(frame, centers, cornersMap, zone, originPx):
     try:
         if zone.get('isComplete'):
             corners_px = zone['corners']
-            corner_labels = ['poly1'] * 4
+            corner_labels = ['poly0'] * 4
             corner_names = ['3', '2', '1', '0']
             corners_world = feed_processing.convertPixelsToWorldCoords(corners_px, originPx, cornersMap)
-            if isinstance(corners_world, tuple) and len(corners_world) == 2:
-                corners_world = [corners_world]
             if isinstance(corners_world, (list, tuple, np.ndarray)) and len(corners_world) > 0 and hasattr(corners_world[0], '__iter__'):
                 for (x, y), poly_id, label in zip(corners_world, corner_labels, corner_names):
                     coordinates_list.append(['corner', poly_id, label, float(x), float(y)])
-
         if ROBOT_ID in centers:
             rCx, rCy, robotTheta = coord_utils.robotWorldPose(centers, cornersMap, ROBOT_ID)
             if rCx is not None and rCy is not None:
                 robot_world = feed_processing.convertPixelsToWorldCoords((rCx, rCy), originPx, cornersMap)
                 if isinstance(robot_world, tuple) and len(robot_world) == 2:
                     coordinates_list.append(['robot', 'robot', '0', float(robot_world[0]), float(robot_world[1])])
-
         if GOAL_ID in centers:
             goal_world = feed_processing.convertPixelsToWorldCoords(centers[GOAL_ID], originPx, cornersMap)
             if isinstance(goal_world, tuple) and len(goal_world) == 2:
                 coordinates_list.append(['goal', 'goal', '0', float(goal_world[0]), float(goal_world[1])])
 
-        obstacles = obstacle.detectObstacles(frame, zone, minArea=2500)
+        obstacles = obstacle.detectObstacles(frame, zone, minArea=1000)
         if obstacles is None:
             obstacles = []
         for obs_idx, obstacle_obj in enumerate(obstacles):
@@ -220,8 +205,7 @@ def _extractCoordinatesFromFrame(frame, centers, cornersMap, zone, originPx):
                 world_vertices = [world_vertices]
             if isinstance(world_vertices, np.ndarray):
                 world_vertices = world_vertices.tolist()
-            num_corners = len(world_vertices)
-            poly_id = f"poly{obs_idx+2}"
+            poly_id = f"poly{obs_idx+1}"
             for v_idx, (x, y) in enumerate(world_vertices):
                 coordinates_list.append([
                     'obstacle',
@@ -231,18 +215,19 @@ def _extractCoordinatesFromFrame(frame, centers, cornersMap, zone, originPx):
                     float(y)
                 ])
 
-        return np.array(coordinates_list, dtype=object) if coordinates_list else np.array([]).reshape(0, 5), robotTheta
+        print(" break ")
+        return np.array(coordinates_list, dtype=object) if coordinates_list else np.array([]).reshape(0, 5)
 
     except Exception:
+        print("No coordinates extracted from frame due to error.")
         return np.array([]).reshape(0, 5)
 
 
 # Example usage and testing
 if __name__ == "__main__":
-    print("Vision Interface Test")
     print("=" * 40)
     
-    coordinates = getCoordinatesFromVision(timeout=None, stabilityFrames=120)
+    coordinates = getCoordinatesFromVision(timeout=None, stabilityFrames=20000)
     
     if coordinates.size == 0:
         print("No coordinates found or timeout occurred")

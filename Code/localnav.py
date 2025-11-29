@@ -35,6 +35,12 @@ def path_intersection_point(path: np.ndarray, segment: np.ndarray) -> tuple[np.n
             return point, i
     return None, None
 
+def rad_to_lsb(angle: float) -> int:
+    return int(np.round(32767 * angle / np.pi))
+
+def lsb_to_rad(lsb: int) -> float:
+    return np.pi * lsb / 32767
+
 class Calibration():
 
     def __init__(self, scale: int, track: int) -> None:
@@ -43,25 +49,30 @@ class Calibration():
 
 class Thymio():
 
-    def __init__(self, calibration: Calibration) -> None:
+    def __init__(self, x0: float, y0: float, theta0: float, calibration: Calibration) -> None:
         
         # Thymio client
         self.client: ClientAsync = ClientAsync()
         self.node: ClientAsyncNode = None
 
+        # Initial pose
+        self.x = int(np.round(x0))
+        self.y = int(np.round(y0))
+        self.theta = theta0
+
         # Calibration and program
         self.cal = calibration
-        with open('thymio.aesl') as file:
+        with open('motorcontrol.aesl') as file:
             self.program = file.read().format(
+                X0 = self.x,
+                Y0 = self.y,
+                THETA0 = rad_to_lsb(self.theta),
                 SCALE = self.cal.scale,
                 TRACK = self.cal.track
             )
 
-        # Robot state
+        # Initial commands
         self.t: float = 0
-        self.x: int = 0
-        self.y: int = 0
-        self.theta: float = 0
         self.v: int = 0
         self.omega: float = 0
 
@@ -98,13 +109,19 @@ class Thymio():
         error = aw(self.node.run())
         if error is not None:
             raise RuntimeError(f'Error {error['error_code']}')
+    
+        # Pump old events
+        while self.t > 1.0:
+            aw(self.client.sleep(0.01))
+
+        # Return object
         return self
 
     def __exit__(self, type, value, traceback) -> None:
         aw(self.node.stop())
         aw(self.node.unlock())
         self.client.__exit__(type, value, traceback)
-        with open('log.csv', 'w') as log:
+        with open('thymio_log.csv', 'w') as log:
             log.write(self.log)
 
     def on_event_received(self, node, event_name, event_data):
@@ -114,9 +131,9 @@ class Thymio():
                 self.t = event_data[0] + event_data[1] / 1000
                 self.x = event_data[2]
                 self.y = event_data[3]
-                self.theta = np.pi * event_data[4] / 32767
+                self.theta = lsb_to_rad(event_data[4])
                 self.v = event_data[5] * (self.cal.scale / 100000)
-                self.omega = np.pi * event_data[6] / 32767
+                self.omega = lsb_to_rad(event_data[6])
                 self.log += f'{self.t}, {self.x}, {self.y}, {self.theta}, {self.v}, {self.omega}\n'
             case 'blocked':
                 self.blocked = True
@@ -124,10 +141,10 @@ class Thymio():
                 self.clear = True
 
     def set_pose(self, x: float, y: float, theta: float) -> None:
-        x = int(np.round(x))
-        y = int(np.round(y))
-        theta = int(np.round(32767 * theta / np.pi))
-        aw(self.node.set_variables({'x_mm': [x], 'y_mm': [y], 'theta': [theta]}))
+        self.x = int(np.round(x))
+        self.y = int(np.round(y))
+        self.theta = theta
+        aw(self.node.set_variables({'x_mm': [self.x], 'y_mm': [self.y], 'theta': [rad_to_lsb(theta)]}))
 
     def set_target(self, x: float, y: float) -> None:
         self.blocked = False
@@ -135,10 +152,12 @@ class Thymio():
         y = int(np.round(y))
         aw(self.node.set_variables({'state': [0], 'r_x_mm': [x], 'r_y_mm': [y]}))
 
+    def set_avoidance_direction(self, direction: int) -> None:
+        self.avoidanceDirection = int(direction)
+
     def probe_obstacle(self, path: np.ndarray) -> None:
         self.clear = False
-        direction = trajectory_direction(path)
-        aw(self.node.set_variables({'state': [1], 'avoid_dir': [direction * 100]}))
+        aw(self.node.set_variables({'state': [1], 'avoid_dir': [self.avoidanceDirection * 50]}))
 
     def is_blocked(self) -> bool:
         blocked = self.blocked
