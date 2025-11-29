@@ -6,7 +6,7 @@ from globalnav import *
 from Kalman import *
 from globalnav_plot import ARROW_LENGTH
 from time import perf_counter
-from vision2 import getVisionCoords, getRobotPositionMm
+from vision2 import getVisionCoords, getRobotPositionMm, getLiveFrameBGR
 from threading import Thread
 from dashboard import setup_dashboard
 import pandas as pd
@@ -179,22 +179,27 @@ def main_thread() -> None:
         df = pd.read_csv("simulation.csv", sep=";")
         coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
         theta0 = 0
+        H_inv = np.eye(3, dtype=float)  # dummy, only used for mapping
 
     # Else capture first image
 
     else:
         coords, theta0, H = getVisionCoords(timeout=None, showDisplay=True)
         print(coords, "Initial orientation: {:.2f}".format(theta0))
-
+        #Calculate inverse homography for later use
+        H_inv = np.linalg.inv(H)
     # Compute best path
 
     handles = setup_dashboard(
     coords=coords,
     initial_theta=theta0,
     epsilon_mm=GLOB_NAV_EPSILON,
+    H_inv=H_inv,
     )
 
+
     fig             = handles["fig"]
+    img_artist      = handles["img_artist"]
     global_path     = handles["global_path"]
     odom_line       = handles["odom_line"]
     odom_arrow      = handles["odom_arrow"]
@@ -239,6 +244,16 @@ def main_thread() -> None:
     log = 'time (s), cam_x (mm), cam_y (mm), cam_theta (rad), odom_x (mm), odom_y (mm), odom_theta (rad), v (mm/s), omega (rad/s), est_x (mm), est_y (mm), est_theta (rad)\n'
 
     while not closed:
+
+        # --- 1) Update live camera image on the left panel ---
+        try:
+            frame_bgr = getLiveFrameBGR()
+            if frame_bgr is not None:
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                img_artist.set_data(frame_rgb)
+        except RuntimeError:
+            # Vision not initialized or camera problem -> just skip
+            pass
 
         # Plot camera detected trajectory 
 
