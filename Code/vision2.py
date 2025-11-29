@@ -409,10 +409,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
 
                     dx = topMidWorld[0] - robotWorld[0]
                     dy = topMidWorld[1] - robotWorld[1]
-                    theta = math.atan2(dy, dx)
-                    if theta < 0:
-                        theta += 2.0 * math.pi
-                    robotThetaWorld = theta
+                    robotThetaWorld = np.atan2(dy, dx)
 
                 obstacles = []
                 if zone.get("isComplete"):
@@ -643,8 +640,6 @@ def getRobotPositionMm(showDisplay=False):
                 dx = topMidWorld[0] - x_mm
                 dy = topMidWorld[1] - y_mm
                 theta = math.atan2(dy, dx)
-                if theta < 0:
-                    theta += 2.0 * math.pi
 
         if showDisplay:
             dispFrame = frame.copy()
