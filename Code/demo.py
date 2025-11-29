@@ -12,10 +12,10 @@ from threading import Thread
 # Testing settings
 
 NO_THYMIO_MODE = False
-NO_CAMERA_MODE = True
+NO_CAMERA_MODE = False
 
 # Thymio calibration settings
-GLOB_NAV_EPSILON = 65
+GLOB_NAV_EPSILON = 90
 ERROR_TOLERANCE = 15
 
 # Kalman settings
@@ -130,14 +130,16 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
             # Run Kalman filter
 
-            estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose, TS, Q, R_cam)
+            #estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose, TS, Q, R_cam)
             newCamPose = False
+            estimatedPose = camPose
 
             # Update position only if off by more than 30 mm (avoid unnecessary rollback)
 
             dx = np.abs(estimatedPose[0] - thymioPose[0])
             dy = np.abs(estimatedPose[1] - thymioPose[1])
-            if dx > 30 or dy > 30:
+            if dx > 15 or dy > 15:
+                print(f"Correcting position by ({dx} mm, {dy} mm)")
                 thymio.set_pose(estimatedPose[0], estimatedPose[1], estimatedPose[2])
 
         # Stop thymio
@@ -172,7 +174,7 @@ def main_thread() -> None:
     # Else capture first image
 
     else:
-        coords, theta0 = getVisionCoords(timeout=None, showDisplay=True)
+        coords, theta0, H = getVisionCoords(timeout=None, showDisplay=True)
         print(coords, "Initial orientation: {:.2f}".format(theta0))
 
     # Compute best path
@@ -184,7 +186,7 @@ def main_thread() -> None:
 
     global_path, debug, fig, ax, odom_line, odom_arrow, cam_line, cam_arrow = setup_globalnav_plot(
         coords,
-        epsilon_mm=50.0,
+        epsilon_mm=GLOB_NAV_EPSILON,
         show_neighbors=False,
         initial_theta=theta0,
     )

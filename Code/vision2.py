@@ -273,7 +273,7 @@ class Obstacle:
         return {"contour": self.contour.tolist(), "area": self.area, "vertices": self.verts}
 
 
-def detectObstacles(frame, zone, minArea=500, maxArea=50000):
+def detectObstacles(frame, zone, minArea=400, maxArea=50000):
     """
     Detect colored obstacles with optimized processing pipeline.
     """
@@ -321,6 +321,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
         (coords, robotThetaWorld)
         coords: numpy array [type, id, label, x, y] in A0 mm
         robotThetaWorld: float angle in radians in A0 world frame, or None
+        H transformation homography matrix
 
     Orientation convention:
         - 0 rad = along +X of homographic/world axis (to the right)
@@ -329,7 +330,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
     """
     global VISION_CAMERA, VISION_H
 
-    bufferLen = 1
+    bufferLen = 15
     coordBuf = []
     camera = None
 
@@ -415,7 +416,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
 
                 obstacles = []
                 if zone.get("isComplete"):
-                    obstacles = detectObstacles(obsFrame, zone, minArea=500)
+                    obstacles = detectObstacles(obsFrame, zone, minArea=400)
 
                 if showDisplay:
                     if zone.get("isComplete") and zone.get("corners"):
@@ -435,7 +436,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         if camera is not None:
                             camera.stop()
                         cv2.destroyAllWindows()
-                        return np.array([]).reshape(0, 5), None
+                        return np.array([]).reshape(0, 5), None, None
 
                 coords = _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles, H)
 
@@ -490,7 +491,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                             if showDisplay:
                                 cv2.destroyAllWindows()
 
-                            return coordBuf[0], robotThetaWorld
+                            return coordBuf[0], robotThetaWorld, H
                     else:
                         coordBuf = [coords.copy()]
             except Exception as e:
@@ -503,7 +504,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                 cv2.destroyAllWindows()
         except Exception:
             pass
-        return np.array([]).reshape(0, 5), None
+        return np.array([]).reshape(0, 5), None, None
 
 
 def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=None):
@@ -555,7 +556,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
                 )
 
         if obstacles is None:
-            obstacles = detectObstacles(frame, zone, minArea=500)
+            obstacles = detectObstacles(frame, zone, minArea=400)
         if obstacles is None:
             obstacles = []
 
