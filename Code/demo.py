@@ -17,12 +17,14 @@ NO_CAMERA_MODE = False
 # Thymio calibration settings
 GLOB_NAV_EPSILON = 90
 ERROR_TOLERANCE = 15
+NUDGE_LENGTH = 110
+SOFT_KIDNAPPING_THRESHOLD = 15
 
 # Kalman settings
 
 TS = 0.1
-Q = np.diag([0.005, 0.005, 0.002])
-R_cam = np.diag([0.002, 0.002, 0.0005])
+Q = np.diag([0.000001, 0.000001, 1.2e-2])
+R_cam = np.diag([0.0005, 0.0005, 0.0005])
 P = np.diag([1.0, 1.0, 0.5])
 
 # Globals
@@ -101,9 +103,8 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
                 case State.FACE_AWAY:
                     if thymio.is_clear():
-                        THYMIO_LENGTH = 110
-                        x = int(thymioPose[0] + THYMIO_LENGTH * np.cos(thymioPose[2]))
-                        y = int(thymioPose[1] + THYMIO_LENGTH * np.sin(thymioPose[2]))
+                        x = int(thymioPose[0] + NUDGE_LENGTH * np.cos(thymioPose[2]))
+                        y = int(thymioPose[1] + NUDGE_LENGTH * np.sin(thymioPose[2]))
                         thymio.set_target(x, y)
                         state = State.EXIT_PATH
 
@@ -114,9 +115,8 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
                 case State.PROBE_OBSTACLE:
                     if thymio.is_clear():
-                        THYMIO_LENGTH = 110
-                        x = int(thymioPose[0] + THYMIO_LENGTH * np.cos(thymioPose[2]))
-                        y = int(thymioPose[1] + THYMIO_LENGTH * np.sin(thymioPose[2]))
+                        x = int(thymioPose[0] + NUDGE_LENGTH * np.cos(thymioPose[2]))
+                        y = int(thymioPose[1] + NUDGE_LENGTH * np.sin(thymioPose[2]))
                         nextMoveLine = np.array([[thymioPose[0], thymioPose[1]], [x, y]])
                         intersect, index = path_intersection_point(avoidancePath, nextMoveLine)
                         if index is not None:
@@ -132,23 +132,21 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                             thymio.set_target(path[1][0], path[1][1])
                             state = State.FOLLOW
                     else:
-                        if np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
+                        if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
                             thymio.probe_obstacle(path)
                             state = State.PROBE_OBSTACLE
 
             # Run Kalman filter
 
-            #estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose, TS, Q, R_cam)
+            estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose, TS, Q, R_cam)
             newCamPose = False
-            estimatedPose = camPose
 
             # Update position only if off by more than 30 mm (avoid unnecessary rollback)
 
-            dx = np.abs(estimatedPose[0] - thymioPose[0])
-            dy = np.abs(estimatedPose[1] - thymioPose[1])
-            if dx > 15 or dy > 15:
-                print(f"Correcting position by ({dx} mm, {dy} mm)")
-                thymio.set_pose(estimatedPose[0], estimatedPose[1], estimatedPose[2])
+            errorNorm = np.linalg.norm((np.round(estimatedPose[:2, 0]) - thymioPose[:2]))
+            if errorNorm > SOFT_KIDNAPPING_THRESHOLD:
+                print(f"Correcting position by ({errorNorm} mm)")
+                thymio.set_pose(estimatedPose[0][0], estimatedPose[1][0], estimatedPose[2][0])
 
         # Stop thymio
 
@@ -230,6 +228,8 @@ def main_thread() -> None:
 
     fig.canvas.mpl_connect('close_event', on_close)
 
+    log = 'time (s), cam_x (mm), cam_y (mm), cam_theta (rad), odom_x (mm), odom_y (mm), odom_theta (rad), v (mm/s), omega (rad/s), est_x (mm), est_y (mm), est_theta (rad)\n'
+
     while not closed:
 
         # Plot camera detected trajectory 
@@ -274,6 +274,11 @@ def main_thread() -> None:
         fig.canvas.draw()
         fig.canvas.flush_events()
         plt.pause(0.025)
+
+        log += f'{thymio.t}, {camPose[0]}, {camPose[1]}, {camPose[2]}, {thymio.x}, {thymio.y}, {thymio.theta}, {thymio.v}, {thymio.omega}\n'
+
+    with open('log.csv', 'w') as log_file:
+        log_file.write(log)
 
 if __name__ == '__main__':
 
