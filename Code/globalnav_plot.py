@@ -2,11 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch, FancyArrowPatch
+from matplotlib.patches import Patch
 
 from globalnav import compute_global_path_with_debug
 
-ARROW_LENGTH = 100.0  # mm, visual length of odometry arrow
 
 # ---------------------------------------------------------
 # USER-DEFINED COLOR SYSTEM (ALL IN THIS FILE)
@@ -57,9 +56,6 @@ def setup_globalnav_plot(
     map_array,
     epsilon_mm: float = 20.0,
     show_neighbors: bool = False,
-    initial_theta: float = 0.0,
-    fig=None,
-    ax=None,
 ):
     """
     Creates a Matplotlib window with:
@@ -82,13 +78,12 @@ def setup_globalnav_plot(
     show_neighbors : bool
         If True, also draws the visibility graph edges.
 
-        Returns
+    Returns
     -------
-    global_path : np.ndarray
-    debug : dict
+    global_path : np.ndarray           # A* path (M, 2)
+    debug : dict                       # polygons, nodes, neighbors, etc.
     fig, ax : Matplotlib figure/axes
-    odom_line : Line2D
-    odom_arrow : FancyArrowPatch
+    odom_line : Line2D                 # odometry line; you update its data
     """
 
     # Get path + all debug info from globalnav
@@ -106,15 +101,11 @@ def setup_globalnav_plot(
     EPSILON          = debug["epsilon_mm"]
 
     # ---------------------------------------------------------
-    # Create or reuse figure / axes
+    # Create figure / axes
     # ---------------------------------------------------------
-    # Create or reuse figure / axes
-    if ax is None:
-        fig, ax = plt.subplots()
-    else:
-        fig = ax.figure
-
+    fig, ax = plt.subplots()
     ax.set_aspect("equal", adjustable="box")
+
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
@@ -191,7 +182,7 @@ def setup_globalnav_plot(
     path_xy = [node_coords[i] for i in path_indices]
     px_path = [p[0] for p in path_xy]
     py_path = [p[1] for p in path_xy]
-    
+
     path_line, = ax.plot(px_path, py_path,
                          color="red",
                          linewidth=2.5,
@@ -208,52 +199,6 @@ def setup_globalnav_plot(
                          alpha=0.9,
                          zorder=12,
                          label="Odometry trajectory")
-    
-    # ---------------------------------------------------------
-    # Camera trajectory (empty initially, updated live)
-    # ---------------------------------------------------------
-    cam_line, = ax.plot([], [],
-                        color="green",
-                        linewidth=1.8,
-                        alpha=0.9,
-                        zorder=13,
-                        label="Camera trajectory")
-
-    # ---------------------------------------------------------
-    # Odometry arrow (current robot pose & heading)
-    # ---------------------------------------------------------
-    # Use the first point of the global path as initial pose
-    x0, y0 = global_path[0]
-    theta0 = initial_theta
-
-    x_head = x0 + ARROW_LENGTH * np.cos(theta0)
-    y_head = y0 + ARROW_LENGTH * np.sin(theta0)
-
-    odom_arrow = FancyArrowPatch(
-        posA=(x0, y0),
-        posB=(x_head, y_head),
-        arrowstyle="->",
-        mutation_scale=15,   # arrowhead size
-        color="blue",
-        linewidth=2.0,
-        zorder=20,
-    )
-    ax.add_patch(odom_arrow)
-
-    # ---------------------------------------------------------
-    # Camera arrow (camera pose & heading)
-    # ---------------------------------------------------------
-    cam_arrow = FancyArrowPatch(
-        posA=(x0, y0),
-        posB=(x0, y0),  # start with zero length; will be updated from vision
-        arrowstyle="->",
-        mutation_scale=15,
-        color="green",
-        linewidth=2.0,
-        zorder=21,
-    )
-    ax.add_patch(cam_arrow)
-
 
     # ---------------------------------------------------------
     # Start and goal
@@ -323,10 +268,7 @@ def setup_globalnav_plot(
             Line2D([], [], color="black", linewidth=0.6, label="Visibility edges")
         )
     legend_elements.append(
-        Line2D([], [], color="blue", linewidth=1.8, label="Odometry")
-    )
-    legend_elements.append(
-        Line2D([], [], color="green", linewidth=1.8, label="Camera")
+        Line2D([], [], color="blue", linewidth=1.8, label="Odometry trajectory")
     )
 
     # Epsilon info (text-only entry)
@@ -349,4 +291,4 @@ def setup_globalnav_plot(
     plt.ion()
     fig.show()
 
-    return global_path, debug, fig, ax, odom_line, odom_arrow, cam_line, cam_arrow
+    return global_path, debug, fig, ax, odom_line
