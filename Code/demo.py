@@ -4,10 +4,13 @@ from enum import Enum
 from localnav import *
 from globalnav import *
 from Kalman import *
-from globalnav_plot import setup_globalnav_plot, ARROW_LENGTH
+from globalnav_plot import ARROW_LENGTH
 from time import perf_counter
 from vision2 import getVisionCoords, getRobotPositionMm
 from threading import Thread
+from dashboard import setup_dashboard
+import pandas as pd
+
 
 # Testing settings
 
@@ -187,17 +190,23 @@ def main_thread() -> None:
 
     # Compute best path
 
-    path = compute_global_path(coords, epsilon_mm=GLOB_NAV_EPSILON)
-    print("A* global path:\n", path)
-
-    # Global nav plot: map + polygons + A* path + empty odometry line
-
-    global_path, debug, fig, ax, odom_line, odom_arrow, odom_circle_map, cam_line, cam_arrow, cam_circle_map = setup_globalnav_plot(
-        coords,
-        epsilon_mm=GLOB_NAV_EPSILON,
-        show_neighbors=False,
-        initial_theta=theta0,
+    handles = setup_dashboard(
+    coords=coords,
+    initial_theta=theta0,
+    epsilon_mm=GLOB_NAV_EPSILON,
     )
+
+    fig             = handles["fig"]
+    global_path     = handles["global_path"]
+    odom_line       = handles["odom_line"]
+    odom_arrow      = handles["odom_arrow"]
+    odom_circle_map = handles["odom_circle_map"]
+    cam_line        = handles["cam_line"]
+    cam_arrow       = handles["cam_arrow"]
+    cam_circle_map  = handles["cam_circle_map"]
+
+    path = global_path.copy()
+    print("A* global path:\n", path)
 
     # Only plot global nav path if thymio is not available
 
@@ -208,7 +217,6 @@ def main_thread() -> None:
         return
     
     # Only start camera thread if camera is available
-
     if not NO_CAMERA_MODE:
         cameraThread = Thread(target=camera_thread, daemon=True)
         cameraThread.start()
