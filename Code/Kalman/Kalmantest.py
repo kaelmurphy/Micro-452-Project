@@ -7,12 +7,12 @@ import numpy as np  # Import NumPy for matrix and vector calculations
 Ts = 1.0  # Sampling period in seconds (camera and filter update every 1 second)
 
 # Process noise covariance matrix Q (model uncertainty)
-# You should tune these numbers based on how noisy your odometry is.
-Q = np.diag([0.01, 0.01, 0.001])  # Diagonal matrix: [q_x, q_y, q_theta]
+# Tuned to match simulation bias: v_bias=0.02, omega_bias=0.03
+Q = np.diag([0.02**2, 0.02**2, 0.03**2])
 
 # Measurement noise covariance matrix R for the camera
-# This describes how noisy the camera pose measurement is.
-R_cam = np.diag([0.02, 0.02, 0.002])  # Diagonal matrix: [r_x, r_y, r_theta]
+# Tuned to match simulation noise: pos_std=0.003, theta_std=0.01
+R_cam = np.diag([0.003**2, 0.003**2, 0.01**2])
 
 # ==========================
 # HELPER FUNCTIONS
