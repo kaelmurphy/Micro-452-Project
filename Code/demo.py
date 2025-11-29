@@ -35,6 +35,7 @@ P = np.diag([1.0, 1.0, 0.5])
 
 thymio: Thymio = None
 camPose: np.ndarray = np.zeros(3)
+estPose: np.ndarray = np.zeros(3)
 newCamPose: bool = None
 robotSeen: bool = False
 hardKidnapping: np.array = None
@@ -45,7 +46,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
     # Shared globals
 
-    global ERROR_TOLERANCE, TS, Q, R_cam, P, thymio, camPose, newCamPose, hardKidnapping
+    global ERROR_TOLERANCE, TS, Q, R_cam, P, thymio, camPose, estPose, newCamPose, hardKidnapping
     
     # Local navigation state machine
 
@@ -147,19 +148,20 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                 R_cam =  np.diag([0.001, 0.001, 0.001])
             else:
                 R_cam =  np.diag([0.0005, 0.0005, 0.0005])
-            estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose and robotSeen, TS, Q, R_cam)
+            est, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose and robotSeen, TS, Q, R_cam)
+            estPose = est.flatten()
             newCamPose = False
 
             # Update position only if off by more than 30 mm (avoid unnecessary rollback)
 
-            errorNorm = np.linalg.norm((np.round(estimatedPose[:2, 0]) - thymioPose[:2]))
+            errorNorm = np.linalg.norm((np.round(estPose[:2]) - thymioPose[:2]))
             if errorNorm > HARD_KIDNAPPING_THRESHOLD:
                 print(f"Hard kidnapping, recomputing path")
                 hardKidnapping = camPose.copy()
                 break
             elif errorNorm > SOFT_KIDNAPPING_THRESHOLD:
                 print(f"Soft kidnapping, correcting position by ({errorNorm} mm)")
-                thymio.set_pose(estimatedPose[0][0], estimatedPose[1][0], estimatedPose[2][0])
+                thymio.set_pose(estPose[0], estPose[1], estPose[2])
 
         # Stop thymio
 
@@ -181,7 +183,7 @@ def main_thread() -> None:
 
     # Globals
 
-    global NO_CAMERA_MODE, NO_THYMIO_MODE, GLOB_NAV_EPSILON, thymio, camPose, hardKidnapping
+    global NO_CAMERA_MODE, NO_THYMIO_MODE, GLOB_NAV_EPSILON, thymio, camPose, estPose, newCamPose, robotSeen, hardKidnapping
 
     # Use simulation map if camera is not available
 
@@ -374,16 +376,19 @@ def main_thread() -> None:
 
         # ---------- UPDATE ERROR PLOT (odom vs camera, bottom-right) ----------
 
-        if robotSeen and newCamPose:
+        pos_odom = np.array([thymio.x, thymio.y])
+        pos_cam  = np.array([estPose[0], estPose[1]])
+        err_val = np.linalg.norm(pos_odom - pos_cam)   # [mm]
 
-            pos_odom = np.array([thymio.x, thymio.y])
-            pos_cam  = np.array([camPose[0], camPose[1]])
-            err_val = np.linalg.norm(pos_odom - pos_cam)   # [mm]
-            err_hist.append(err_val)
+        # Clamp error value for better visualization
+        if err_val > 2 * ERROR_TOLERANCE:
+            err_val = 2 * ERROR_TOLERANCE
 
-            err_line.set_data(t_hist, err_hist)
-            ax_err.relim()
-            ax_err.autoscale_view()
+        err_hist.append(err_val)
+
+        err_line.set_data(t_hist, err_hist)
+        ax_err.relim()
+        ax_err.autoscale_view()
 
         # Update figure
 
