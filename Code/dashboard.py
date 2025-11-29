@@ -37,6 +37,7 @@ def setup_dashboard(
     coords: np.ndarray,
     initial_theta: float = 0.0,
     epsilon_mm: float = None,
+    H_inv: np.ndarray = None, 
 ):
     """
     ...
@@ -46,6 +47,8 @@ def setup_dashboard(
     """
     if epsilon_mm is None:
         raise ValueError("setup_dashboard: epsilon_mm must be provided (e.g. GLOB_NAV_EPSILON).")
+    if H_inv is None:
+        raise ValueError("setup_dashboard: H_inv must be provided (inverse homography world->pixel).")
 
     # --- Create figure and 3 panels using GridSpec ---
     fig = plt.figure(figsize=(19, 6))
@@ -109,8 +112,17 @@ def setup_dashboard(
     # ------------------------------------------------------------------
     # PATH OVERLAY ON CAMERA (LEFT PANEL)
     # ------------------------------------------------------------------
-    # Build a simple world->pixel mapping just for this demo:
-    world_to_pix = make_world_to_pixel_mapper(global_path, cam_width, cam_height)
+    def world_to_pix(xw, yw):
+        """
+        Map world coordinates [mm] to pixel coordinates using H_inv.
+
+        H maps pixel -> world.
+        H_inv maps world -> pixel.
+        """
+        pts_world = np.array([[[xw, yw]]], dtype=np.float32)  # shape (1,1,2)
+        pts_pix = cv2.perspectiveTransform(pts_world, H_inv)  # shape (1,1,2)
+        px, py = pts_pix[0, 0]
+        return float(px), float(py)
 
     # Map all path points to pixel coords
     px_list = []
@@ -230,14 +242,14 @@ def setup_dashboard(
         "cam_line": cam_line,
         "cam_arrow": cam_arrow,
         "ax_cov": ax_cov,
-        "ax_err": ax_err,                             # NEW
+        "ax_err": ax_err,
         "path_nodes_scatter": path_nodes_scatter,
         "path_line_cam": path_line_cam,
         "cam_width": cam_width,
         "cam_height": cam_height,
         "world_to_pix": world_to_pix,
         "cov_lines": (line_sigx, line_sigy, line_sigtheta),
-        "err_line": err_line,                         # NEW
+        "err_line": err_line,
         # map-side circles (from setup_globalnav_plot)
         "odom_circle_map": odom_circle_map,
         "cam_circle_map": cam_circle_map,
@@ -247,7 +259,6 @@ def setup_dashboard(
         "odom_arrow_cam": odom_arrow_cam,
         "cam_arrow_cam": cam_arrow_cam,
     }
-
 
 
 # ----------------------------------------------------------------------
@@ -393,11 +404,14 @@ def run_demo():
     coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
 
     epsilon_demo = 50.0  # or any test value you like
+    # Dummy homography inverse: world mm ~= pixel coords
+    H_inv_demo = np.eye(3, dtype=np.float32)
 
     handles = setup_dashboard(
         coords=coords,
         initial_theta=0.0,
         epsilon_mm=epsilon_demo,
+        H_inv=H_inv_demo,   # <-- add this
     )
 
     fig         = handles["fig"]

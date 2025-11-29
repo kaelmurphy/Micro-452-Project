@@ -665,6 +665,18 @@ def stopVision():
         VISION_CAMERA = None
     cv2.destroyAllWindows()
 
+def getLiveFrameBGR():
+    """
+    Return the latest BGR frame from the cached CameraStream started by
+    getVisionCoords(). Raises if vision hasn't been initialized.
+    """
+    global VISION_CAMERA
+    if VISION_CAMERA is None:
+        raise RuntimeError(
+            "Vision not initialized. Call getVisionCoords(...) once first "
+            "to lock in the zone and homography."
+        )
+    return VISION_CAMERA.read()
 
 # MAIN TEST HARNESS
 # ============================================================
