@@ -127,7 +127,7 @@ def setup_dashboard(
         return float(px), float(py)
 
     # ------------------------------------------------------------------
-    # CROP / ZOOM CAMERA VIEW TO BOARD USING H_inv
+    # CROP / ZOOM CAMERA VIEW TO BOARD USING H_inv (WITH ZOOM-OUT)
     # ------------------------------------------------------------------
     # World corners of the board in mm
     board_world = np.array(
@@ -143,21 +143,37 @@ def setup_dashboard(
     # Map those world corners to pixel coordinates with H_inv
     board_pix = cv2.perspectiveTransform(board_world, H_inv).reshape(-1, 2)
 
-    x_min_pix = board_pix[:, 0].min()
-    x_max_pix = board_pix[:, 0].max()
-    y_min_pix = board_pix[:, 1].min()
-    y_max_pix = board_pix[:, 1].max()
+    x_min = board_pix[:, 0].min()
+    x_max = board_pix[:, 0].max()
+    y_min = board_pix[:, 1].min()
+    y_max = board_pix[:, 1].max()
 
-    # Optional: add a small pixel margin so the markers are not cut off
-    margin = 10
-    x_min_pix -= margin
-    x_max_pix += margin
-    y_min_pix -= margin
-    y_max_pix += margin
+    # Compute center + size
+    cx = 0.5 * (x_min + x_max)
+    cy = 0.5 * (y_min + y_max)
+    w  = (x_max - x_min)
+    h  = (y_max - y_min)
 
-    # Set camera axes limits so we only see the paper region
+    # Zoom *out* by this factor (>1.0 = show more around the board)
+    ZOOM_OUT = 1.4   # try 1.2–1.6; increase if still too zoomed
+
+    half_w = 0.5 * w * ZOOM_OUT
+    half_h = 0.5 * h * ZOOM_OUT
+
+    x_min_pix = cx - half_w
+    x_max_pix = cx + half_w
+    y_min_pix = cy - half_h
+    y_max_pix = cy + half_h
+
+    # Clamp to the actual image size [0, cam_width] x [0, cam_height]
+    x_min_pix = max(0, x_min_pix)
+    y_min_pix = max(0, y_min_pix)
+    x_max_pix = min(cam_width,  x_max_pix)
+    y_max_pix = min(cam_height, y_max_pix)
+
+    # Apply limits (note: y inverted because image origin is top-left)
     ax_cam.set_xlim(x_min_pix, x_max_pix)
-    ax_cam.set_ylim(y_max_pix, y_min_pix)  # note: y inverted
+    ax_cam.set_ylim(y_max_pix, y_min_pix)
 
 
     # Map all path points to pixel coords
@@ -428,264 +444,3 @@ def world_to_pix_with_H(points_world, H_inv):
 # ----------------------------------------------------------------------
 # MAIN DEMO LOOP
 # ----------------------------------------------------------------------
-
-def run_demo():
-    """
-    Standalone demo:
-      - creates the dashboard,
-      - animates fake camera frames on the left,
-      - moves a fake robot along the global path in the center.
-    """
-    # For demo: load coords from CSV
-    df = pd.read_csv(CSV_PATH, sep=";")
-    coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
-
-    epsilon_demo = 50.0  # or any test value you like
-    # Dummy homography inverse: world mm ~= pixel coords
-    H_inv_demo = np.eye(3, dtype=np.float32)
-
-    handles = setup_dashboard(
-        coords=coords,
-        initial_theta=0.0,
-        epsilon_mm=epsilon_demo,
-        H_inv=H_inv_demo,   # <-- add this
-    )
-
-    fig         = handles["fig"]
-    ax_cam      = handles["ax_cam"]
-    img_artist  = handles["img_artist"]
-    ax_map      = handles["ax_map"]
-    global_path = handles["global_path"]
-    odom_line   = handles["odom_line"]
-    odom_arrow  = handles["odom_arrow"]
-    cam_line    = handles["cam_line"]
-    cam_arrow   = handles["cam_arrow"]
-    world_to_pix = handles["world_to_pix"]
-    # map-side circles
-    odom_circle_map = handles["odom_circle_map"]
-    cam_circle_map = handles["cam_circle_map"]
-    # camera-overlay (pixel) markers
-    odom_circle_cam = handles["odom_circle_cam"]
-    cam_circle_cam = handles["cam_circle_cam"]
-    odom_arrow_cam = handles["odom_arrow_cam"]
-    cam_arrow_cam = handles["cam_arrow_cam"]
-    ax_cov      = handles["ax_cov"]
-    ax_err      = handles["ax_err"]          # NEW
-    cam_width   = handles["cam_width"]
-    cam_height  = handles["cam_height"]
-    line_sigx, line_sigy, line_sigtheta = handles["cov_lines"]
-    err_line    = handles["err_line"]        # NEW
-
-# ------------------------------------------------------------------
-    # ROBOT PATH + EKF SETUP
-    # ------------------------------------------------------------------
-    step_size = 10.0  # mm / iteration
-    robot_traj = simulate_robot_along_path(global_path, step_size=step_size)
-
-    # Ground truth initial pose
-    x_true, y_true, theta_true = next(robot_traj)
-    x_prev_true, y_prev_true, theta_prev_true = x_true, y_true, theta_true
-
-    # EKF state (estimate) and covariance
-    x_est = np.array([[x_true],
-                      [y_true],
-                      [theta_true]])  # (3,1)
-
-    Q = np.diag([0.005, 0.005, 0.002])
-    R_cam = np.diag([0.002, 0.002, 0.0005])
-    P = np.diag([1.0, 1.0, 0.5])
-
-    # History for plotting covariance
-    t_hist = []
-    sigx_hist = []
-    sigy_hist = []
-    sigtheta_hist = []
-    err_hist = []    # NEW: position error history
-
-    # Initialize odometry trail with the first estimate
-    xs = [float(x_est[0, 0])]
-    ys = [float(x_est[1, 0])]
-    odom_line.set_data(xs, ys)
-
-    # Initial odometry arrow
-    x0, y0 = xs[0], ys[0]
-    theta0 = float(x_est[2, 0])
-    x_head0 = x0 + ARROW_LENGTH * np.cos(theta0)
-    y_head0 = y0 + ARROW_LENGTH * np.sin(theta0)
-    odom_arrow.set_positions((x0, y0), (x_head0, y_head0))
-
-    # initialize map-side circles
-    try:
-        odom_circle_map.center = (x0, y0)
-    except Exception:
-        # some backends have Circle with attribute 'center' writable
-        pass
-
-    try:
-        cam_circle_map.center = (x0, y0)
-    except Exception:
-        pass
-
-    # initialize camera-overlay markers
-    ARROW_PIX = 40.0
-    px0, py0 = world_to_pix(x0, y0)
-    odom_circle_cam.center = (px0, py0)
-    odom_arrow_cam.set_positions((px0, py0), (px0 + ARROW_PIX, py0))
-    cam_circle_cam.center = (px0, py0)
-    cam_arrow_cam.set_positions((px0, py0), (px0 + ARROW_PIX, py0))
-
-    plt.ion()
-    fig.show()
-
-    t_start = time.time()
-    t_last = t_start
-
-    try:
-        while True:
-            t_now = time.time()
-            t_rel = t_now - t_start
-            Ts = t_now - t_last
-            t_last = t_now
-            if Ts <= 0:
-                Ts = 0.02
-
-            # ----------------------------------------------------------
-            # 1) Update simulated camera frame (LEFT)
-            # ----------------------------------------------------------
-            frame_bgr = make_fake_camera_frame(t_rel, width=cam_width, height=cam_height)
-            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            img_artist.set_data(frame_rgb)
-
-            # ----------------------------------------------------------
-            # 2) Ground truth robot move along path
-            # ----------------------------------------------------------
-            x_true, y_true, theta_true = next(robot_traj)
-
-            dx_true = x_true - x_prev_true
-            dy_true = y_true - y_prev_true
-            dist_true = np.hypot(dx_true, dy_true)
-            v_wheel = dist_true / Ts
-
-            dtheta_true = wrap_angle(theta_true - theta_prev_true)
-            omega_wheel = dtheta_true / Ts
-
-            x_prev_true, y_prev_true, theta_prev_true = x_true, y_true, theta_true
-
-            # ----------------------------------------------------------
-            # 3) Simulated camera measurement (noisy)
-            # ----------------------------------------------------------
-            z_cam = np.array([
-                x_true  + np.random.normal(0.0, np.sqrt(R_cam[0, 0])),
-                y_true  + np.random.normal(0.0, np.sqrt(R_cam[1, 1])),
-                theta_true + np.random.normal(0.0, np.sqrt(R_cam[2, 2])),
-            ])
-
-            # ----------------------------------------------------------
-            # 4) EKF STEP
-            # ----------------------------------------------------------
-            x_est, P = ekf_step(
-                x_prev=x_est,
-                P_prev=P,
-                v_wheel=v_wheel,
-                omega_wheel=omega_wheel,
-                z_cam=z_cam,
-                camera_on=True,
-                Ts=Ts,
-                Q=Q,
-                R_cam=R_cam,
-            )
-
-            # ----------------------------------------------------------
-            # 5) UPDATE MAP ODOMETRY WITH ESTIMATE (MIDDLE)
-            # ----------------------------------------------------------
-            x_est_val = float(x_est[0, 0])
-            y_est_val = float(x_est[1, 0])
-            theta_est = float(x_est[2, 0])
-
-            xs.append(x_est_val)
-            ys.append(y_est_val)
-            odom_line.set_data(xs, ys)
-
-            x_head = x_est_val + ARROW_LENGTH * np.cos(theta_est)
-            y_head = y_est_val + ARROW_LENGTH * np.sin(theta_est)
-            odom_arrow.set_positions((x_est_val, y_est_val), (x_head, y_head))
-
-            # Update map-side robot base circles and camera measurement arrow
-            try:
-                odom_circle_map.center = (x_est_val, y_est_val)
-            except Exception:
-                pass
-
-            try:
-                cam_circle_map.center = (z_cam[0], z_cam[1])
-                # update the on-map camera arrow to match camera-measured theta
-                x_head_cam_map = z_cam[0] + ARROW_LENGTH * np.cos(z_cam[2])
-                y_head_cam_map = z_cam[1] + ARROW_LENGTH * np.sin(z_cam[2])
-                cam_arrow.set_positions((z_cam[0], z_cam[1]), (x_head_cam_map, y_head_cam_map))
-            except Exception:
-                pass
-
-            # Update camera-overlay (pixel) markers
-            try:
-                px_est, py_est = world_to_pix(x_est_val, y_est_val)
-                px_cam_m, py_cam_m = world_to_pix(z_cam[0], z_cam[1])
-
-                # odometry marker on camera overlay
-                odom_circle_cam.center = (px_est, py_est)
-                px_head_est = px_est + ARROW_PIX * np.cos(theta_est)
-                py_head_est = py_est - ARROW_PIX * np.sin(theta_est)
-                odom_arrow_cam.set_positions((px_est, py_est), (px_head_est, py_head_est))
-
-                # camera measurement marker on overlay
-                cam_circle_cam.center = (px_cam_m, py_cam_m)
-                px_head_cam = px_cam_m + ARROW_PIX * np.cos(z_cam[2])
-                py_head_cam = py_cam_m - ARROW_PIX * np.sin(z_cam[2])
-                cam_arrow_cam.set_positions((px_cam_m, py_cam_m), (px_head_cam, py_head_cam))
-            except Exception:
-                pass
-
-            # ----------------------------------------------------------
-            # 6A) UPDATE COVARIANCE PLOT (RIGHT, top)
-            # ----------------------------------------------------------
-            t_hist.append(t_rel)
-            sigx_hist.append(P[0, 0])
-            sigy_hist.append(P[1, 1])
-            sigtheta_hist.append(P[2, 2])
-
-            line_sigx.set_data(t_hist, sigx_hist)
-            line_sigy.set_data(t_hist, sigy_hist)
-            line_sigtheta.set_data(t_hist, sigtheta_hist)
-
-            ax_cov.relim()
-            ax_cov.autoscale_view()
-
-            # ----------------------------------------------------------
-            # 6B) UPDATE ERROR PLOT (ODOM vs CAMERA, bottom right)
-            # ----------------------------------------------------------
-            pos_est = np.array([x_est_val, y_est_val])
-            pos_cam = np.array([z_cam[0], z_cam[1]])   # camera "real" position
-
-            err_val = np.linalg.norm(pos_est - pos_cam)  # Euclidean distance in mm
-            err_hist.append(err_val)
-
-            err_line.set_data(t_hist, err_hist)
-            ax_err.relim()
-            ax_err.autoscale_view()
-
-            # ----------------------------------------------------------
-            # 7) REDRAW
-            # ----------------------------------------------------------
-            fig.canvas.draw_idle()
-            fig.canvas.flush_events()
-            time.sleep(0.02)
-
-    except KeyboardInterrupt:
-        print("Exiting dashboard demo.")
-
-
-# ----------------------------------------------------------------------
-# ENTRY POINT
-# ----------------------------------------------------------------------
-
-if __name__ == "__main__":
-    run_demo()
