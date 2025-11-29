@@ -163,7 +163,7 @@ def camera_thread() -> None:
     
     while True:
 
-        x_mm, y_mm, theta = getRobotPositionMm(showDisplay=False)
+        x_mm, y_mm, theta, robot_seen = getRobotPositionMm(showDisplay=False)
         camPose = np.array([x_mm, y_mm, theta])
         newCamPose = True
 
