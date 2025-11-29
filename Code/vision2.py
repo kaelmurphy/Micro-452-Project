@@ -9,6 +9,11 @@ import time
 ROBOT_ID = 8
 GOAL_ID = 9
 
+# GLOBAL VISION STATE
+# ===========================================================
+VISION_CAMERA = None  # cached CameraStream
+VISION_H = None       # cached pixel->world homography
+
 
 # CAMERA STREAM
 # ============================================================
@@ -158,8 +163,8 @@ def computeHomography(zone):
 
     src = np.array(zone["corners"], dtype=np.float32)
 
-    widthMm = 1250.0
-    heightMm = 740.0
+    widthMm = 1255.0
+    heightMm = 740
 
     dst = np.array(
         [
@@ -268,7 +273,7 @@ class Obstacle:
         return {"contour": self.contour.tolist(), "area": self.area, "vertices": self.verts}
 
 
-def detectObstacles(frame, zone, minArea=400, maxArea=50000):
+def detectObstacles(frame, zone, minArea=500, maxArea=50000):
     """
     Detect colored obstacles with optimized processing pipeline.
     """
@@ -316,8 +321,15 @@ def getVisionCoords(timeout=None, showDisplay=True):
         (coords, robotThetaWorld)
         coords: numpy array [type, id, label, x, y] in A0 mm
         robotThetaWorld: float angle in radians in A0 world frame, or None
+
+    Orientation convention:
+        - 0 rad = along +X of homographic/world axis (to the right)
+        - angle increases counter-clockwise
+        - theta is wrapped into [0, 2π)
     """
-    bufferLen = 15
+    global VISION_CAMERA, VISION_H
+
+    bufferLen = 1
     coordBuf = []
     camera = None
 
@@ -339,6 +351,8 @@ def getVisionCoords(timeout=None, showDisplay=True):
                 if elapsed > timeout:
                     if camera is not None:
                         camera.stop()
+                    if showDisplay:
+                        cv2.destroyAllWindows()
                     return np.array([]).reshape(0, 5), None
 
             frame = camera.read() if camera is not None else None
@@ -369,8 +383,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         (255, 255, 255),
                         thickness=-1,
                     )
-                
-                # White paintover for goal in obstacle frame
+
                 if GOAL_ID in centerMap and GOAL_ID in cornerMap:
                     gx, gy = centerMap[GOAL_ID]
                     goalCorners = cornerMap[GOAL_ID].astype(np.int32)
@@ -385,7 +398,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         thickness=-1,
                     )
 
-                # Robot orientation in world frame
+                # Robot orientation in world frame (0 = right, CCW, wrapped to [0, 2π))
                 if (ROBOT_ID in centerMap) and (H is not None) and (ROBOT_ID in cornerMap):
                     robotWorld = pixelToWorld(centerMap[ROBOT_ID], H)
 
@@ -395,11 +408,14 @@ def getVisionCoords(timeout=None, showDisplay=True):
 
                     dx = topMidWorld[0] - robotWorld[0]
                     dy = topMidWorld[1] - robotWorld[1]
-                    robotThetaWorld = math.atan2(dy, dx)
+                    theta = math.atan2(dy, dx)
+                    if theta < 0:
+                        theta += 2.0 * math.pi
+                    robotThetaWorld = theta
 
                 obstacles = []
                 if zone.get("isComplete"):
-                    obstacles = detectObstacles(obsFrame, zone, minArea=400)
+                    obstacles = detectObstacles(obsFrame, zone, minArea=500)
 
                 if showDisplay:
                     if zone.get("isComplete") and zone.get("corners"):
@@ -467,10 +483,13 @@ def getVisionCoords(timeout=None, showDisplay=True):
                             and hasGoal
                             and hasObstacle
                         ):
-                            if camera is not None:
-                                camera.stop()
+                            # Cache camera and homography for fast tracking.
+                            VISION_CAMERA = camera   # keep it running
+                            VISION_H = H
+
                             if showDisplay:
                                 cv2.destroyAllWindows()
+
                             return coordBuf[0], robotThetaWorld
                     else:
                         coordBuf = [coords.copy()]
@@ -536,7 +555,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
                 )
 
         if obstacles is None:
-            obstacles = detectObstacles(frame, zone, minArea=400)
+            obstacles = detectObstacles(frame, zone, minArea=500)
         if obstacles is None:
             obstacles = []
 
@@ -561,8 +580,89 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
         return np.array(coordList, dtype=object) if coordList else np.array([]).reshape(0, 5)
 
     except Exception:
-        print("error.")
+        print("No coordinates extracted from frame due to error.")
         return np.array([]).reshape(0, 5)
+
+
+# FAST ROBOT POSE QUERY
+# ============================================================
+
+def getRobotPositionMm(showDisplay=False):
+    """
+    Lightweight function to get the robot's current pose in world mm.
+
+    This will BLOCK until the robot is detected; if the robot is
+    not visible, it keeps trying forever.
+
+    Returns:
+        (x_mm, y_mm, theta_world_rad)
+
+        - x_mm, y_mm in homographic world mm
+        - theta_world_rad in [0, 2π), with:
+            0    = facing +X (to the right along bottom horizontal)
+            π/2  = facing +Y (up)
+            π    = facing -X (left)
+            3π/2 = facing -Y (down)
+    """
+    global VISION_CAMERA, VISION_H
+
+    if VISION_CAMERA is None or VISION_H is None:
+        raise RuntimeError(
+            "Vision not initialized. Call getVisionCoords(...) once first "
+            "to lock in the zone and homography."
+        )
+
+    while True:
+        frame = VISION_CAMERA.read()
+        if frame is None:
+            time.sleep(0.01)
+            continue
+
+        _, centerMap, cornerMap, _ = detectAruco(frame)
+
+        if ROBOT_ID not in centerMap:
+            time.sleep(0.01)
+            continue
+
+        # Robot position in world mm using cached homography
+        robotWorld = pixelToWorld(centerMap[ROBOT_ID], VISION_H)
+        if robotWorld is None:
+            time.sleep(0.01)
+            continue
+
+        x_mm, y_mm = robotWorld
+
+        # Orientation from top edge of the marker, in [0, 2π)
+        theta = None
+        if ROBOT_ID in cornerMap:
+            rCorners = cornerMap[ROBOT_ID].astype(float)
+            topMidPx = (rCorners[0] + rCorners[1]) / 2.0
+            topMidWorld = pixelToWorld(topMidPx, VISION_H)
+            if topMidWorld is not None:
+                dx = topMidWorld[0] - x_mm
+                dy = topMidWorld[1] - y_mm
+                theta = math.atan2(dy, dx)
+                if theta < 0:
+                    theta += 2.0 * math.pi
+
+        if showDisplay:
+            dispFrame = frame.copy()
+            drawRobot(dispFrame, centerMap[ROBOT_ID], cornerMap.get(ROBOT_ID))
+            cv2.imshow("Robot Tracking", dispFrame)
+            cv2.waitKey(1)
+
+        return x_mm, y_mm, theta
+
+
+def stopVision():
+    """
+    Cleanly stop the cached camera and close any OpenCV windows.
+    """
+    global VISION_CAMERA
+    if VISION_CAMERA is not None:
+        VISION_CAMERA.stop()
+        VISION_CAMERA = None
+    cv2.destroyAllWindows()
 
 
 # MAIN TEST HARNESS
@@ -571,6 +671,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
 if __name__ == "__main__":
     print("=" * 40)
 
+    # Heavy init once: compute homography, obstacles, etc.
     coords, theta = getVisionCoords(timeout=None, showDisplay=True)
 
     if coords.size == 0:
@@ -579,3 +680,9 @@ if __name__ == "__main__":
         print("Returned coordinates array:")
         print(coords)
         print("Robot theta (world frame, rad):", theta)
+
+        # Example of fast position refresh (blocks until robot detected):
+        x, y, th = getRobotPositionMm(showDisplay=False)
+        print("Fast robot position (mm):", x, y, "theta:", th)
+
+    stopVision()
