@@ -140,7 +140,10 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                             state = State.PROBE_OBSTACLE
 
             # Run Kalman filter
-
+            if state != State.FOLLOW:
+                R_cam =  np.diag([0.001, 0.001, 0.001])
+            else:
+                R_cam =  np.diag([0.0005, 0.0005, 0.0005])
             estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose, TS, Q, R_cam)
             newCamPose = False
 
