@@ -373,14 +373,17 @@ def main_thread() -> None:
         ax_cov.autoscale_view()
 
         # ---------- UPDATE ERROR PLOT (odom vs camera, bottom-right) ----------
-        pos_odom = np.array([thymio.x, thymio.y])
-        pos_cam  = np.array([camPose[0], camPose[1]])
-        err_val = np.linalg.norm(pos_odom - pos_cam)   # [mm]
-        err_hist.append(err_val)
 
-        err_line.set_data(t_hist, err_hist)
-        ax_err.relim()
-        ax_err.autoscale_view()
+        if robotSeen and newCamPose:
+
+            pos_odom = np.array([thymio.x, thymio.y])
+            pos_cam  = np.array([camPose[0], camPose[1]])
+            err_val = np.linalg.norm(pos_odom - pos_cam)   # [mm]
+            err_hist.append(err_val)
+
+            err_line.set_data(t_hist, err_hist)
+            ax_err.relim()
+            ax_err.autoscale_view()
 
         # Update figure
 
