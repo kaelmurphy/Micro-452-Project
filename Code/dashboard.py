@@ -243,9 +243,10 @@ def setup_dashboard(
 
     # RIGHT TOP: KALMAN COVARIANCE
     # ------------------------------------------------------------------
-    ax_cov.set_title("Kalman covariance")
+    ax_cov.set_title("EKF covariance (diagonal)")
     ax_cov.set_xlabel("time [s]")
     ax_cov.set_ylabel(r"$\mathrm{variance}\;[\mathrm{mm}^2,\;\mathrm{rad}^2]$")
+
     line_sigx, = ax_cov.plot([], [], label="σx²")
     line_sigy, = ax_cov.plot([], [], label="σy²")
     line_sigtheta, = ax_cov.plot([], [], label="σθ²")
