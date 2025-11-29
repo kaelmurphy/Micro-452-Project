@@ -10,7 +10,7 @@ The vision program is called from our demo file using a single function: getVisi
 
 ---
 
-### 2. Vision Acquisition Pipeline  
+### 2. Vision acquisition pipeline  
 The overall workflow used for vision acquisition is as follows:
 
 #### a) Capture camera feed  
@@ -45,10 +45,13 @@ Before performing obstacle detection, the robot and goal markers are removed fro
 We need to find the angle that the robot is at when we a querying the vision program. To do this, pass the pixel location of the center of the robot ArUco into the homography transform to return the point in mm. Then find the top left and the top right corners of the ArUco code of the robot, calculate the center point of these two using (TR - TL) / 2
 where TR and TL are in pixel coordinates. Using the homography transform from earlier, we can then turn this point into world coordinates in mm. Drawing a line from the center of the ArUco code to this new point creates an angle with the horizontal axis produced by the homography transform.
 
-#### g) Obstacle Detection
+#### g) Obstacle detection
 Once we have created the operating zone and gotten the angle of the robot, we check the image frame to see if there are any obstacles. The function detectObstacles(obsFrame, zone, minArea=) takes in the copy of the frame we made that has the white circles on it, the zone built for the corners, and the minimum area boundary for a valid obstacle in squared pixels. We do a lot of blurring, filtering, and masking, find the edges of the obstacles and draw contours on them. If the contours enclose an area greater than our minimum, an obstacle instance is added to the obstacle list which gets returned from this function.
 
 #### h) Drawing
 Now that we have the pixel coordinates for our zone, robot, and goal, we draw them all using the draw helpers. 
 
 #### i) Coordinate conversion
+Create an array that stores all the coordinates in pixel locations, we will then use the _extractFrameCoords function, which takes the frame, list of aruco codes, the operating zone, and whether there are obstacles and an H transform. First, take all the corners that get passed in through the ArUco list and call the pixelToWorld function to return mm coordinates, order matters, we start in the bottom left starting with ID 3 and work CCW to ID 0 in the top left, add all these new coordinates to the coordList to be returned. Next find robot and goal coordinates using the same pixelToWorld function. Finally, convert all the vertices of each obstacle to world coordinates using getWorldVerts function. 
+
+#### j) 
