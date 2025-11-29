@@ -10,7 +10,7 @@ from vision2 import getVisionCoords, getRobotPositionMm, getLiveFrameBGR
 from threading import Thread
 from dashboard import setup_dashboard
 import pandas as pd
-
+import cv2
 
 # Testing settings
 
@@ -22,6 +22,7 @@ GLOB_NAV_EPSILON = 90
 ERROR_TOLERANCE = 15
 NUDGE_LENGTH = 110
 SOFT_KIDNAPPING_THRESHOLD = 15
+HARD_KIDNAPPING_THRESHOLD = 200
 
 # Kalman settings
 
@@ -35,6 +36,8 @@ P = np.diag([1.0, 1.0, 0.5])
 thymio: Thymio = None
 camPose: np.ndarray = np.zeros(3)
 newCamPose: bool = None
+robotSeen: bool = False
+hardKidnapping: np.array = None
 
 # Threads
 
@@ -42,7 +45,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
     # Shared globals
 
-    global ERROR_TOLERANCE, TS, Q, R_cam, P, thymio, camPose, newCamPose
+    global ERROR_TOLERANCE, TS, Q, R_cam, P, thymio, camPose, newCamPose, hardKidnapping
     
     # Local navigation state machine
 
@@ -112,7 +115,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                         state = State.EXIT_PATH
 
                 case State.EXIT_PATH:
-                    if np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
+                    if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
                         thymio.probe_obstacle(path)
                         state = State.PROBE_OBSTACLE
 
@@ -144,14 +147,18 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                 R_cam =  np.diag([0.001, 0.001, 0.001])
             else:
                 R_cam =  np.diag([0.0005, 0.0005, 0.0005])
-            estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose, TS, Q, R_cam)
+            estimatedPose, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose and robotSeen, TS, Q, R_cam)
             newCamPose = False
 
             # Update position only if off by more than 30 mm (avoid unnecessary rollback)
 
             errorNorm = np.linalg.norm((np.round(estimatedPose[:2, 0]) - thymioPose[:2]))
-            if errorNorm > SOFT_KIDNAPPING_THRESHOLD:
-                print(f"Correcting position by ({errorNorm} mm)")
+            if errorNorm > HARD_KIDNAPPING_THRESHOLD:
+                print(f"Hard kidnapping, recomputing path")
+                hardKidnapping = camPose.copy()
+                break
+            elif errorNorm > SOFT_KIDNAPPING_THRESHOLD:
+                print(f"Soft kidnapping, correcting position by ({errorNorm} mm)")
                 thymio.set_pose(estimatedPose[0][0], estimatedPose[1][0], estimatedPose[2][0])
 
         # Stop thymio
@@ -162,11 +169,11 @@ def camera_thread() -> None:
 
     # Globals
 
-    global camPose, newCamPose
+    global camPose, newCamPose, robotSeen
     
     while True:
 
-        x_mm, y_mm, theta, robot_seen = getRobotPositionMm(showDisplay=False)
+        x_mm, y_mm, theta, robotSeen = getRobotPositionMm(showDisplay=False)
         camPose = np.array([x_mm, y_mm, theta])
         newCamPose = True
 
@@ -174,7 +181,7 @@ def main_thread() -> None:
 
     # Globals
 
-    global NO_CAMERA_MODE, NO_THYMIO_MODE, GLOB_NAV_EPSILON, thymio, camPose
+    global NO_CAMERA_MODE, NO_THYMIO_MODE, GLOB_NAV_EPSILON, thymio, camPose, hardKidnapping
 
     # Use simulation map if camera is not available
 
@@ -199,7 +206,6 @@ def main_thread() -> None:
     epsilon_mm=GLOB_NAV_EPSILON,
     H_inv=H_inv,
     )
-
 
     fig             = handles["fig"]
     img_artist      = handles["img_artist"]
@@ -248,6 +254,45 @@ def main_thread() -> None:
 
     while not closed:
 
+        # Handle hard kidnapping by restarting thymio thread
+
+        if hardKidnapping is not None:
+
+            coords[4][3] = hardKidnapping[0]
+            coords[4][4] = hardKidnapping[1]
+            theta0 = hardKidnapping[2]
+
+            print("Recomputing global path...")
+
+            hardKidnapping = None
+
+            while thymioThread.is_alive():
+                plt.pause(0.1)
+
+            handles = setup_dashboard(
+                coords=coords,
+                initial_theta=theta0,
+                epsilon_mm=GLOB_NAV_EPSILON,
+                H_inv=H_inv,
+            )
+
+            fig             = handles["fig"]
+            img_artist      = handles["img_artist"]
+            global_path     = handles["global_path"]
+            odom_line       = handles["odom_line"]
+            odom_arrow      = handles["odom_arrow"]
+            odom_circle_map = handles["odom_circle_map"]
+            cam_line        = handles["cam_line"]
+            cam_arrow       = handles["cam_arrow"]
+            cam_circle_map  = handles["cam_circle_map"]
+
+            path = global_path.copy()
+
+            thymioThread = Thread(target=thymio_thread, args=(path, theta0), daemon=True)
+            thymioThread.start()
+            while thymio is None:
+                plt.pause(0.001)
+
         # --- 1) Update live camera image on the left panel ---
         try:
             frame_bgr = getLiveFrameBGR()
@@ -258,23 +303,25 @@ def main_thread() -> None:
             # Vision not initialized or camera problem -> just skip
             pass
 
-        # Plot camera detected trajectory 
+        if robotSeen and newCamPose:
 
-        xs_cam, ys_cam = cam_line.get_data()
-        xs_cam = list(xs_cam) + [camPose[0]]
-        ys_cam = list(ys_cam) + [camPose[1]]
-        cam_line.set_data(xs_cam, ys_cam)
+            # Plot camera detected trajectory 
 
-        # Plot camera detected heading 
+            xs_cam, ys_cam = cam_line.get_data()
+            xs_cam = list(xs_cam) + [camPose[0]]
+            ys_cam = list(ys_cam) + [camPose[1]]
+            cam_line.set_data(xs_cam, ys_cam)
 
-        x_head_cam = camPose[0] + ARROW_LENGTH * np.cos(camPose[2])
-        y_head_cam = camPose[1] + ARROW_LENGTH * np.sin(camPose[2])
-        cam_arrow.set_positions((camPose[0], camPose[1]), (x_head_cam, y_head_cam))
-        try:
-            cam_circle_map.center = (camPose[0], camPose[1])
-        except Exception:
-            pass
-        
+            # Plot camera detected heading 
+
+            x_head_cam = camPose[0] + ARROW_LENGTH * np.cos(camPose[2])
+            y_head_cam = camPose[1] + ARROW_LENGTH * np.sin(camPose[2])
+            cam_arrow.set_positions((camPose[0], camPose[1]), (x_head_cam, y_head_cam))
+            try:
+                cam_circle_map.center = (camPose[0], camPose[1])
+            except Exception:
+                pass
+            
         # Plot odometry detected trajectory 
 
         xs, ys = odom_line.get_data()
