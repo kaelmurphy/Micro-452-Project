@@ -56,7 +56,7 @@ class Thymio():
 
         # Calibration and program
         self.cal = calibration
-        with open('thymio.aesl') as file:
+        with open('motorcontrol.aesl') as file:
             self.program = file.read().format(
                 X0 = self.x,
                 Y0 = self.y,
