@@ -278,9 +278,9 @@ def setup_globalnav_plot(
 
     ax.legend(
         handles=legend_elements,
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.5),   # outside on the right
-        borderaxespad=1.0,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.10),   # place BELOW plot
+        ncol=3,                        # fit wide horizontally
         frameon=True
     )
 
