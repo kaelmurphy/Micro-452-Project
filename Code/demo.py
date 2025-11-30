@@ -191,15 +191,22 @@ def main_thread() -> None:
         df = pd.read_csv("simulation.csv", sep=";")
         coords = df[["type", "id", "label", "x", "y"]].to_numpy(dtype=object)
         theta0 = 0
+        board_corners_pix = None
+        cam_width = 640
+        cam_height = 480
         H_inv = np.eye(3, dtype=float)  # dummy, only used for mapping
 
     # Else capture first image
 
     else:
-        coords, theta0, H = getVisionCoords(timeout=None, showDisplay=True)
+        #coords, theta0, H = getVisionCoords(timeout=None, showDisplay=True)
+        coords, theta0, H, board_corners_pix = getVisionCoords(timeout=None, showDisplay=True)
         print(coords, "Initial orientation: {:.2f}".format(theta0))
         #Calculate inverse homography for later use
         H_inv = np.linalg.inv(H)
+        frame0 = getLiveFrameBGR()
+        cam_height, cam_width = frame0.shape[:2]
+
     # Compute best path
 
     handles = setup_dashboard(
@@ -207,6 +214,9 @@ def main_thread() -> None:
     initial_theta=theta0,
     epsilon_mm=GLOB_NAV_EPSILON,
     H_inv=H_inv,
+    board_corners_pix=board_corners_pix,
+    cam_width=cam_width,
+    cam_height=cam_height,
     )
 
     fig             = handles["fig"]
@@ -223,6 +233,13 @@ def main_thread() -> None:
     ax_err          = handles["ax_err"]
     line_sigx, line_sigy, line_sigtheta = handles["cov_lines"]
     err_line        = handles["err_line"]
+
+    # camera-overlay & mapping handles
+    world_to_pix    = handles["world_to_pix"]
+    odom_circle_cam = handles["odom_circle_cam"]
+    cam_circle_cam  = handles["cam_circle_cam"]
+    odom_arrow_cam  = handles["odom_arrow_cam"]
+    cam_arrow_cam   = handles["cam_arrow_cam"]
 
     path = global_path.copy()
     print("A* global path:\n", path)
@@ -290,6 +307,9 @@ def main_thread() -> None:
                 initial_theta=theta0,
                 epsilon_mm=GLOB_NAV_EPSILON,
                 H_inv=H_inv,
+                board_corners_pix=board_corners_pix,
+                cam_width=cam_width,
+                cam_height=cam_height,
             )
 
             fig             = handles["fig"]
@@ -301,6 +321,18 @@ def main_thread() -> None:
             cam_line        = handles["cam_line"]
             cam_arrow       = handles["cam_arrow"]
             cam_circle_map  = handles["cam_circle_map"]
+
+            ax_cov          = handles["ax_cov"]
+            ax_err          = handles["ax_err"]
+            line_sigx, line_sigy, line_sigtheta = handles["cov_lines"]
+            err_line        = handles["err_line"]
+
+            #camera-overlay & mapping handles
+            world_to_pix    = handles["world_to_pix"]
+            odom_circle_cam = handles["odom_circle_cam"]
+            cam_circle_cam  = handles["cam_circle_cam"]
+            odom_arrow_cam  = handles["odom_arrow_cam"]
+            cam_arrow_cam   = handles["cam_arrow_cam"]
 
             path = global_path.copy()
 
@@ -357,6 +389,30 @@ def main_thread() -> None:
         x_head = x + ARROW_LENGTH * np.cos(theta_est)
         y_head = y + ARROW_LENGTH * np.sin(theta_est)
         odom_arrow.set_positions((x, y), (x_head, y_head))
+
+        # ----------------------------------------------------------
+        #  UPDATE CAMERA-OVERLAY MARKERS ON LEFT PANEL
+        # ----------------------------------------------------------
+        ARROW_PIX = 40.0
+
+        # 1) ODOM overlaid on camera image
+        px_odom, py_odom = world_to_pix(thymio.x, thymio.y)
+        odom_circle_cam.center = (px_odom, py_odom)
+
+        px_head_odom = px_odom + ARROW_PIX * np.cos(thymio.theta)
+        py_head_odom = py_odom - ARROW_PIX * np.sin(thymio.theta)   # minus: screen y grows downward
+        odom_arrow_cam.set_positions((px_odom, py_odom),
+                                    (px_head_odom, py_head_odom))
+
+        # 2) CAMERA measurement overlaid on camera image
+        if robotSeen:
+            px_cam, py_cam = world_to_pix(camPose[0], camPose[1])
+            cam_circle_cam.center = (px_cam, py_cam)
+
+            px_head_cam = px_cam + ARROW_PIX * np.cos(camPose[2])
+            py_head_cam = py_cam - ARROW_PIX * np.sin(camPose[2])
+            cam_arrow_cam.set_positions((px_cam, py_cam),
+                                        (px_head_cam, py_head_cam))
 
         # ---------- UPDATE COVARIANCE PLOT (top-right) ----------
         t_rel = perf_counter() - t0
