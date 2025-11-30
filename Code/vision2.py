@@ -27,6 +27,16 @@ class CameraStream:
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.cap.set(cv2.CAP_PROP_FPS, fps)
+
+        # Camera warm-up to avoid super-saturated startup frames
+        # Discard the first N frames while auto-exposure/auto-gain settles.
+        warmup_frames = 30
+        for _ in range(warmup_frames):
+            ok, _ = self.cap.read()
+            if not ok:
+                break
+            time.sleep(0.02)
+
         self.lock = threading.Lock()
         self.running = False
         self.thread = None
@@ -330,7 +340,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
     """
     global VISION_CAMERA, VISION_H
 
-    bufferLen = 15
+    bufferLen = 20
     coordBuf = []
     camera = None
 
@@ -354,7 +364,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         camera.stop()
                     if showDisplay:
                         cv2.destroyAllWindows()
-                    return np.array([]).reshape(0, 5), None, None, None
+                    return np.array([]).reshape(0, 5), None
 
             frame = camera.read() if camera is not None else None
             if frame is None:
@@ -433,7 +443,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         if camera is not None:
                             camera.stop()
                         cv2.destroyAllWindows()
-                        return np.array([]).reshape(0, 5), None, None, None
+                        return np.array([]).reshape(0, 5), None, None
 
                 coords = _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles, H)
 
@@ -487,12 +497,8 @@ def getVisionCoords(timeout=None, showDisplay=True):
 
                             if showDisplay:
                                 cv2.destroyAllWindows()
-                            
-                            board_corners_pix = np.array(zone["corners"], dtype=np.float32) if zone.get("corners") else None
-                            
-                            return coordBuf[0], robotThetaWorld, H, board_corners_pix
 
-                        
+                            return coordBuf[0], robotThetaWorld, H
                     else:
                         coordBuf = [coords.copy()]
             except Exception as e:
@@ -505,7 +511,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                 cv2.destroyAllWindows()
         except Exception:
             pass
-        return np.array([]).reshape(0, 5), None, None, None
+        return np.array([]).reshape(0, 5), None, None
 
 
 def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=None):
@@ -526,7 +532,7 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
                 isinstance(cornersWorld, (list, tuple, np.ndarray))
                 and len(cornersWorld) > 0
                 and hasattr(cornersWorld[0], "__iter__")
-            ):   
+            ):
                 for (x, y), polyId, label in zip(cornersWorld, cornerLabels, cornerNames):
                     coordList.append(["square", polyId, label, float(x), float(y)])
 
@@ -664,6 +670,7 @@ def stopVision():
         VISION_CAMERA = None
     cv2.destroyAllWindows()
 
+
 def getLiveFrameBGR():
     """
     Return the latest BGR frame from the cached CameraStream started by
@@ -677,6 +684,7 @@ def getLiveFrameBGR():
         )
     return VISION_CAMERA.read()
 
+
 # MAIN TEST HARNESS
 # ============================================================
 
@@ -684,8 +692,7 @@ if __name__ == "__main__":
     print("=" * 40)
 
     # Heavy init once: compute homography, obstacles, etc.
-    #coords, theta = getVisionCoords(timeout=None, showDisplay=True)
-    coords, theta, H, board_corners_pix = getVisionCoords(timeout=None, showDisplay=True)
+    coords, theta = getVisionCoords(timeout=None, showDisplay=True)
 
     if coords.size == 0:
         print("No coordinates found or timeout occurred")
