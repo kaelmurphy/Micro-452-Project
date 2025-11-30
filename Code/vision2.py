@@ -340,7 +340,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
     """
     global VISION_CAMERA, VISION_H
 
-    bufferLen = 20
+    bufferLen = 12
     coordBuf = []
     camera = None
 
