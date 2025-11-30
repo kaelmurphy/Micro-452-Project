@@ -1,3 +1,20 @@
+"""globalnav.py
+
+Visibility-graph / A* global planner used by the dashboard/demo.
+
+Responsibilities:
+ - parse the incoming map array or DataFrame
+ - ensure polygon orientation (CCW) where required
+ - inflate obstacles by epsilon (configuration-space)
+ - extract nodes (vertices + start/goal)
+ - build visibility graph and run A* to compute an optimal continuous path
+
+Notes
+-----
+Shapely expects exterior polygon rings to be consistently oriented (CCW).
+"""
+
+import logging
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5,23 +22,30 @@ import matplotlib as mpl
 from shapely.geometry import Polygon, LineString
 import math
 import heapq
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
 from typing import Dict, List, Tuple
 
+# module logger
+logger = logging.getLogger(__name__)
 
 # 1. Helpers: orientation (CCW / CW)
-def signed_area(ring):
-    # shoelace formula; positive => CCW, negative => CW
+def signed_area(ring: List[Tuple[float, float]]) -> float:
+    """Compute signed area using the shoelace formula.
+
+    Positive area indicates a counter-clockwise ordering, negative means
+    clockwise. The function expects a sequence of (x,y) pairs representing
+    a closed ring (the function handles wrapping from last to first).
+    """
     a = 0.0
-    for (x1,y1),(x2,y2) in zip(ring, ring[1:]+ring[:1]):
-        a += x1*y2 - x2*y1
+    for (x1, y1), (x2, y2) in zip(ring, ring[1:] + ring[:1]):
+        a += x1 * y2 - x2 * y1
     return 0.5 * a
 
-def is_ccw(ring):
+def is_ccw(ring: List[Tuple[float, float]]) -> bool:
+    """Return True if ring vertices are ordered counter-clockwise."""
     return signed_area(ring) > 0
 
-def ensure_ccw(ring):
+def ensure_ccw(ring: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    """Return a CCW-ordered copy of the ring (reverses order if needed)."""
     return ring if is_ccw(ring) else list(reversed(ring))
 
 # 2. Parsing the input
@@ -93,17 +117,15 @@ def _build_polygons_and_special_points(
             flipped.append(pid)
         polygons_ccw[pid] = ccw_pts
 
-    # Print summary
+    # Log summary
     if len(flipped) == 0:
-        print("All polygons are already counter-clockwise (CCW).")
+        logger.debug("All polygons are already counter-clockwise (CCW).")
     else:
-        print("The following polygons were clockwise (CW) and have been flipped to CCW:")
-        for pid in flipped:
-            print(f"  - {pid}")
+        logger.info("The following polygons were clockwise (CW) and have been flipped to CCW: %s", flipped)
 
-    print("Number of polygons:", len(polygons_ccw))
-    print("polygons keys:", list(polygons_ccw.keys()))
-    print("special points:", special_points)
+    logger.debug("Number of polygons: %d", len(polygons_ccw))
+    logger.debug("polygons keys: %s", list(polygons_ccw.keys()))
+    logger.debug("special points: %s", special_points)
 
 
     return polygons_ccw, special_points
@@ -112,16 +134,20 @@ def _build_polygons_and_special_points(
 
 
 # 3. Polygon inflation
-def inflate_polygons(polygons_ccw, epsilon, shrink_outer=True):
+def inflate_polygons(
+    polygons_ccw: Dict[str, List[Tuple[float, float]]],
+    epsilon: float,
+    shrink_outer: bool = True,
+) -> Dict[str, List[Tuple[float, float]]]:
     """
     polygons_ccw: dict pid -> [(x,y), ...]  (already CCW for the original shapes)
-    epsilon: inflation radius (cm)
+    epsilon: inflation radius (mm)
     shrink_outer: (currently ignored) outer boundary poly0 is kept unchanged
     
     returns: new dict pid -> [(x,y), ...] for inflated/shrunk polygons,
              each ring forced to CCW using ensure_ccw().
     """
-    inflated = {}
+    inflated: Dict[str, List[Tuple[float, float]]] = {}
 
     for pid, ring in polygons_ccw.items():
         poly = Polygon(ring)
@@ -153,7 +179,10 @@ def inflate_polygons(polygons_ccw, epsilon, shrink_outer=True):
 
 
 # 4. Building graph nodes from polygons
-def build_nodes_from_polygons(polygons_ccw, special_points):
+def build_nodes_from_polygons(
+    polygons_ccw: Dict[str, List[Tuple[float, float]]],
+    special_points: Dict[str, Tuple[float, float]],
+) -> Tuple[List[Tuple[float, float]], List[str], int, int]:
     """
     polygons_ccw: dict pid -> [(x,y), ...], including 'poly0'
     special_points: {'start': (sx,sy), 'goal': (gx,gy)}
@@ -189,8 +218,8 @@ def build_nodes_from_polygons(polygons_ccw, special_points):
     node_labels.append("goal")
 
     N = len(node_coords)
-    print("Total nodes:", N)
-    print("start_idx:", start_idx, "goal_idx:", goal_idx)
+    logger.debug("Total nodes: %d", N)
+    logger.debug("start_idx: %d, goal_idx: %d", start_idx, goal_idx)
 
 
     return node_coords, node_labels, start_idx, goal_idx 
@@ -329,11 +358,11 @@ def astar(neighbors, node_coords, start_idx, goal_idx):
     path_indices.reverse()
 
     if path_indices is None:
-        print("No path found.")
+        logger.warning("No path found.")
     else:
-        print("A* operation count:", operation_count)
-        print("Number of explored nodes:", len(explored))
-        print("Path node indices:", path_indices)
+        logger.debug("A* operation count: %d", operation_count)
+        logger.debug("Number of explored nodes: %d", len(explored))
+        logger.info("Path node indices: %s", path_indices)
 
     return path_indices, explored, operation_count
 
@@ -365,11 +394,11 @@ def compute_global_path(
 
     # 6) Build neighbors (visibility graph)
     neighbors_eps = build_neighbors(node_coords_eps, world_poly_eps, obstacle_polys_eps)
-    print(neighbors_eps)
-    
-    print("\n=== NEIGHBOR COUNTS ===")
+    logger.debug("neighbors (adjacency): %s", neighbors_eps)
+
+    logger.info("=== NEIGHBOR COUNTS ===")
     for i, nbrs in enumerate(neighbors_eps):
-        print(f"Node {i:2d} ({node_labels_eps[i]:8s}) has {len(nbrs)} neighbors")
+        logger.debug("Node %d (%s) has %d neighbors", i, node_labels_eps[i], len(nbrs))
 
     # 7) Run A*
     path_indices, explored_nodes, op_count = astar(
@@ -377,10 +406,10 @@ def compute_global_path(
     )
 
     if path_indices is None:
-        print("No path found by A* for the given map and inflation radius.")
+        logger.warning("No path found by A* for the given map and inflation radius.")
     else:
-        print("Path labels:", [node_labels_eps[i] for i in path_indices])
-        print("Path coordinates:", [node_coords_eps[i] for i in path_indices])
+        logger.info("Path labels: %s", [node_labels_eps[i] for i in path_indices])
+        logger.info("Path coordinates: %s", [node_coords_eps[i] for i in path_indices])
 
     # 8) Turn into NumPy array: global_path
     global_path = np.array([node_coords_eps[i] for i in path_indices], dtype=float)
@@ -431,9 +460,9 @@ def compute_global_path_with_debug(
     # 6) Build neighbors (visibility graph)
     neighbors_eps = build_neighbors(node_coords_eps, world_poly_eps, obstacle_polys_eps)
 
-    print("\n=== NEIGHBOR COUNTS ===")
+    logger.info("=== NEIGHBOR COUNTS ===")
     for i, nbrs in enumerate(neighbors_eps):
-        print(f"Node {i:2d} ({node_labels_eps[i]:8s}) has {len(nbrs)} neighbors")
+        logger.debug("Node %d (%s) has %d neighbors", i, node_labels_eps[i], len(nbrs))
 
     # 7) Run A*
     path_indices, explored_nodes, op_count = astar(
@@ -443,8 +472,8 @@ def compute_global_path_with_debug(
     if path_indices is None:
         raise RuntimeError("No path found by A* for the given map and inflation radius.")
 
-    print("Path labels:", [node_labels_eps[i] for i in path_indices])
-    print("Path coordinates:", [node_coords_eps[i] for i in path_indices])
+    logger.info("Path labels: %s", [node_labels_eps[i] for i in path_indices])
+    logger.info("Path coordinates: %s", [node_coords_eps[i] for i in path_indices])
 
     # 8) Turn into NumPy array: global_path
     global_path = np.array([node_coords_eps[i] for i in path_indices], dtype=float)
