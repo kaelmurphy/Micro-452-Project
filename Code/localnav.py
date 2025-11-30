@@ -157,7 +157,7 @@ class Thymio():
 
     def probe_obstacle(self, path: np.ndarray) -> None:
         self.clear = False
-        aw(self.node.set_variables({'state': [1], 'avoid_dir': [self.avoidanceDirection * 50]}))
+        aw(self.node.set_variables({'state': [1], 'avoid_dir': [self.avoidanceDirection * 100]}))
 
     def is_blocked(self) -> bool:
         blocked = self.blocked
