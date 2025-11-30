@@ -364,7 +364,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         camera.stop()
                     if showDisplay:
                         cv2.destroyAllWindows()
-                    return np.array([]).reshape(0, 5), None
+                    return np.array([]).reshape(0, 5), None, None, None
 
             frame = camera.read() if camera is not None else None
             if frame is None:
@@ -443,7 +443,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                         if camera is not None:
                             camera.stop()
                         cv2.destroyAllWindows()
-                        return np.array([]).reshape(0, 5), None, None
+                        return np.array([]).reshape(0, 5), None, None, None
 
                 coords = _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles, H)
 
@@ -498,7 +498,9 @@ def getVisionCoords(timeout=None, showDisplay=True):
                             if showDisplay:
                                 cv2.destroyAllWindows()
 
-                            return coordBuf[0], robotThetaWorld, H
+                            board_corners_pix = np.array(zone["corners"], dtype=np.float32) if zone.get("corners") else None
+                            
+                            return coordBuf[0], robotThetaWorld, H, board_corners_pix
                     else:
                         coordBuf = [coords.copy()]
             except Exception as e:
@@ -511,7 +513,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
                 cv2.destroyAllWindows()
         except Exception:
             pass
-        return np.array([]).reshape(0, 5), None, None
+        return np.array([]).reshape(0, 5), None, None, None
 
 
 def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=None):

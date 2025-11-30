@@ -21,8 +21,8 @@ var y_um = 0
 var theta = {THETA0}
 
 # Reference
-var r_x_mm = 0
-var r_y_mm = 0
+var r_x_mm = {X1}
+var r_y_mm = {Y1}
 
 # Cartesian error
 var e_x_mm = 0
@@ -36,7 +36,7 @@ var epsilon = 0
 var k_e_num = 8
 var k_e_den = 1
 var k_epsilon_num = 1
-var k_epsilon_den = 64
+var k_epsilon_den = 16
 
 # Control inputs
 var v = 0

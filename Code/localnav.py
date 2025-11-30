@@ -49,7 +49,7 @@ class Calibration():
 
 class Thymio():
 
-    def __init__(self, x0: float, y0: float, theta0: float, calibration: Calibration) -> None:
+    def __init__(self, x0: float, y0: float, theta0: float, x1: float, y1: float, calibration: Calibration) -> None:
         
         # Thymio client
         self.client: ClientAsync = ClientAsync()
@@ -66,6 +66,8 @@ class Thymio():
             self.program = file.read().format(
                 X0 = self.x,
                 Y0 = self.y,
+                X1 = int(np.round(x1)),
+                Y1 = int(np.round(y1)),
                 THETA0 = rad_to_lsb(self.theta),
                 SCALE = self.cal.scale,
                 TRACK = self.cal.track
