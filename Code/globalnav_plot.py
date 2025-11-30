@@ -1,3 +1,16 @@
+"""
+Visualization utilities for the global navigation module.
+
+This file builds a Matplotlib figure showing:
+- original vs inflated polygonal obstacles (configuration-space inflation),
+- start/goal markers,
+- the A* optimal path computed on the visibility graph,
+- live-updated odometry and camera-based trajectories.
+
+It is used by the dashboard to visualize the global plan and the robot’s motion
+(see report: Global Navigation section, Visibility Graph + A*).
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -6,7 +19,12 @@ from matplotlib.patches import Patch, FancyArrowPatch, Circle
 
 from globalnav import compute_global_path_with_debug
 
-ARROW_LENGTH = 100.0  # mm, visual length of odometry arrow
+# ---------------------------------------------------------
+# GLOBAL VISUAL CONSTANTS
+# ---------------------------------------------------------
+ARROW_LENGTH = 100.0   # mm, visual length of odometry arrow
+ROBOT_RADIUS = 30.0    # mm, radius of drawn robot/camera circles
+TICK_STEP   = 100.0    # mm, grid spacing for axes
 
 # ---------------------------------------------------------
 # USER-DEFINED COLOR SYSTEM (ALL IN THIS FILE)
@@ -82,7 +100,7 @@ def setup_globalnav_plot(
     show_neighbors : bool
         If True, also draws the visibility graph edges.
 
-        Returns
+    Returns
     -------
     global_path : np.ndarray
     debug : dict
@@ -105,8 +123,6 @@ def setup_globalnav_plot(
     path_indices     = debug["path_indices"]
     EPSILON          = debug["epsilon_mm"]
 
-    # ---------------------------------------------------------
-    # Create or reuse figure / axes
     # ---------------------------------------------------------
     # Create or reuse figure / axes
     if ax is None:
@@ -241,7 +257,7 @@ def setup_globalnav_plot(
     ax.add_patch(odom_arrow)
 
     # Small circle for the odometry robot base (so arrow is clearly attached)
-    odom_circle = Circle((x0, y0), radius=30.0, facecolor="none",
+    odom_circle = Circle((x0, y0), radius=ROBOT_RADIUS, facecolor="none",
                          edgecolor="blue", linewidth=1.8, zorder=19)
     ax.add_patch(odom_circle)
 
@@ -260,7 +276,7 @@ def setup_globalnav_plot(
     ax.add_patch(cam_arrow)
 
     # Small circle for the camera robot base (on-map camera measurement)
-    cam_circle = Circle((x0, y0), radius=30.0, facecolor="none",
+    cam_circle = Circle((x0, y0), radius=ROBOT_RADIUS, facecolor="none",
                         edgecolor="green", linewidth=1.8, zorder=19)
     ax.add_patch(cam_circle)
 
@@ -280,9 +296,8 @@ def setup_globalnav_plot(
     # ---------------------------------------------------------
     # Axes cosmetics
     # ---------------------------------------------------------
-    tick_step = 100  # mm
-    ax.set_xticks(np.arange(xmin, xmax + 1, tick_step))
-    ax.set_yticks(np.arange(ymin, ymax + 1, tick_step))
+    ax.set_xticks(np.arange(xmin, xmax + 1, TICK_STEP))
+    ax.set_yticks(np.arange(ymin, ymax + 1, TICK_STEP))
     ax.grid(True, linewidth=0.5, alpha=0.3)
 
     ax.set_xlim(xmin - pad, xmax + pad)
