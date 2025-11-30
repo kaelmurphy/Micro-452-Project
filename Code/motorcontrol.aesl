@@ -21,8 +21,8 @@ var y_um = 0
 var theta = {THETA0}
 
 # Reference
-var r_x_mm = 0
-var r_y_mm = 0
+var r_x_mm = {X1}
+var r_y_mm = {Y1}
 
 # Cartesian error
 var e_x_mm = 0
@@ -36,7 +36,7 @@ var epsilon = 0
 var k_e_num = 8
 var k_e_den = 1
 var k_epsilon_num = 1
-var k_epsilon_den = 64
+var k_epsilon_den = 16
 
 # Control inputs
 var v = 0
@@ -46,6 +46,7 @@ var right = 0
 
 # Avoidance
 var i = 0
+var j = 0
 var prox_sum = 0
 var state = 0
 var avoid_dir = 0
@@ -146,6 +147,11 @@ onevent motor
 		if prox_sum > 0 then
 			motor.left.target = avoid_dir
 			motor.right.target = -avoid_dir
+			j = 0
+		elseif j < 150 then
+			motor.left.target = avoid_dir
+			motor.right.target = -avoid_dir
+			j++
 		else
 			motor.left.target = 0
 			motor.right.target = 0

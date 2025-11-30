@@ -39,7 +39,10 @@ def setup_dashboard(
     coords: np.ndarray,
     initial_theta: float = 0.0,
     epsilon_mm: float = None,
-    H_inv: np.ndarray = None, 
+    H_inv: np.ndarray = None,
+    board_corners_pix: np.ndarray = None,
+    cam_width = None,
+    cam_height = None,
 ):
     """
     ...
@@ -51,6 +54,10 @@ def setup_dashboard(
         raise ValueError("setup_dashboard: epsilon_mm must be provided (e.g. GLOB_NAV_EPSILON).")
     if H_inv is None:
         raise ValueError("setup_dashboard: H_inv must be provided (inverse homography world->pixel).")
+    # Fallback defaults if not passed (ONLY used in simulation / tests)
+    if cam_width is None or cam_height is None:
+        cam_width = 640
+        cam_height = 480
 
     # --- Create figure and 3 panels using GridSpec ---
     fig = plt.figure(figsize=(19, 6))
@@ -68,17 +75,13 @@ def setup_dashboard(
     ax_cov = fig.add_subplot(right_gs[0, 0])   # top
     ax_err = fig.add_subplot(right_gs[1, 0])   # bottom
 
-    # --- camera resolution (fake) ---
-    cam_height = 720
-    cam_width = 960
-
     # ------------------------------------------------------------------
     # LEFT PANEL: SIMULATED CAMERA
     # ------------------------------------------------------------------
     # Start with a black frame; we'll overwrite it each loop.
     fake_frame = np.zeros((cam_height, cam_width, 3), dtype=np.uint8)
     img_artist = ax_cam.imshow(fake_frame)
-    ax_cam.set_title("Camera (simulated)")
+    ax_cam.set_title("Camera")
     ax_cam.axis("off")
 
     # Make sure axes are in pixel coordinates:
@@ -127,53 +130,49 @@ def setup_dashboard(
         return float(px), float(py)
 
     # ------------------------------------------------------------------
-    # CROP / ZOOM CAMERA VIEW TO BOARD USING H_inv (WITH ZOOM-OUT)
+    # CROP CAMERA VIEW AROUND THE FOUR MARKERS
     # ------------------------------------------------------------------
-    # World corners of the board in mm
-    board_world = np.array(
-        [
-            [0.0,             0.0],
-            [BOARD_WIDTH_MM,  0.0],
-            [BOARD_WIDTH_MM,  BOARD_HEIGHT_MM],
-            [0.0,             BOARD_HEIGHT_MM],
-        ],
-        dtype=np.float32
-    ).reshape(-1, 1, 2)
+    if board_corners_pix is not None:
+        # board_corners_pix is 4x2, type float32
+        board_pix = np.asarray(board_corners_pix, dtype=np.float32).reshape(-1, 2)
 
-    # Map those world corners to pixel coordinates with H_inv
-    board_pix = cv2.perspectiveTransform(board_world, H_inv).reshape(-1, 2)
+        x_min_pix = board_pix[:, 0].min()
+        x_max_pix = board_pix[:, 0].max()
+        y_min_pix = board_pix[:, 1].min()
+        y_max_pix = board_pix[:, 1].max()
 
-    x_min = board_pix[:, 0].min()
-    x_max = board_pix[:, 0].max()
-    y_min = board_pix[:, 1].min()
-    y_max = board_pix[:, 1].max()
+        # Add margin so the markers & paper are fully visible
+        margin = 30  # tweak this as you like
+        x_min_pix = max(0, x_min_pix - margin)
+        x_max_pix = min(cam_width,  x_max_pix + margin)
+        y_min_pix = max(0, y_min_pix - margin)
+        y_max_pix = min(cam_height, y_max_pix + margin)
 
-    # Compute center + size
-    cx = 0.5 * (x_min + x_max)
-    cy = 0.5 * (y_min + y_max)
-    w  = (x_max - x_min)
-    h  = (y_max - y_min)
+        # Apply limits (note: y inverted for images)
+        ax_cam.set_xlim(x_min_pix, x_max_pix)
+        ax_cam.set_ylim(y_max_pix, y_min_pix)
+    else:
+        # Fallback: full frame
+        ax_cam.set_xlim(0, cam_width)
+        ax_cam.set_ylim(cam_height, 0)
 
-    # Zoom *out* by this factor (>1.0 = show more around the board)
-    ZOOM_OUT = 1.4   # try 1.2–1.6; increase if still too zoomed
+    # ------------------------------------------------------------------
+    # DEBUG: draw world board corners (should land on the ArUco markers!)
+    # ------------------------------------------------------------------
+    board_world_mm = np.array([
+        [0.0,             0.0],
+        [BOARD_WIDTH_MM,  0.0],
+        [BOARD_WIDTH_MM,  BOARD_HEIGHT_MM],
+        [0.0,             BOARD_HEIGHT_MM],
+    ])
 
-    half_w = 0.5 * w * ZOOM_OUT
-    half_h = 0.5 * h * ZOOM_OUT
+    bx, by = [], []
+    for xw, yw in board_world_mm:
+        px, py = world_to_pix(xw, yw)
+        bx.append(px)
+        by.append(py)
 
-    x_min_pix = cx - half_w
-    x_max_pix = cx + half_w
-    y_min_pix = cy - half_h
-    y_max_pix = cy + half_h
-
-    # Clamp to the actual image size [0, cam_width] x [0, cam_height]
-    x_min_pix = max(0, x_min_pix)
-    y_min_pix = max(0, y_min_pix)
-    x_max_pix = min(cam_width,  x_max_pix)
-    y_max_pix = min(cam_height, y_max_pix)
-
-    # Apply limits (note: y inverted because image origin is top-left)
-    ax_cam.set_xlim(x_min_pix, x_max_pix)
-    ax_cam.set_ylim(y_max_pix, y_min_pix)
+    ax_cam.scatter(bx, by, s=40, c="yellow", marker="x", zorder=200)
 
 
     # Map all path points to pixel coords
@@ -272,9 +271,9 @@ def setup_dashboard(
     # ------------------------------------------------------------------
     # RIGHT BOTTOM: POSITION ERROR (ODOM vs CAMERA)
     # ------------------------------------------------------------------
-    ax_err.set_title("Odom vs camera position error")
+    ax_err.set_title("Odom vs EKF estimate")
     ax_err.set_xlabel("time [s]")
-    ax_err.set_ylabel("‖pos_est - pos_cam‖ [mm]")
+    ax_err.set_ylabel("‖pos_est - pos_est‖ [mm]")
 
     err_line, = ax_err.plot([], [], label="position error")
     ax_err.legend(loc="upper right")
@@ -312,135 +311,3 @@ def setup_dashboard(
         "odom_arrow_cam": odom_arrow_cam,
         "cam_arrow_cam": cam_arrow_cam,
     }
-
-
-# ----------------------------------------------------------------------
-# SIMPLE SIMULATION HELPERS
-# ----------------------------------------------------------------------
-
-def make_fake_camera_frame(t: float, width: int = 960, height: int = 720):
-    """
-    Create a simple synthetic camera frame:
-    - black background
-    - a colored circle moving in a Lissajous-ish pattern over time.
-
-    Args:
-        t:      time in seconds (or any continuous parameter)
-        width:  frame width in pixels
-        height: frame height in pixels
-
-    Returns:
-        frame:  (H, W, 3) uint8 BGR image
-    """
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
-
-    # Center and radii for the motion
-    cx = int(width / 2 + (width / 4) * np.cos(0.7 * t))
-    cy = int(height / 2 + (height / 4) * np.sin(1.1 * t))
-    radius = 30
-
-    # BGR color (green-ish)
-    color = (0, 200, 100)
-
-    cv2.circle(frame, (cx, cy), radius, color, thickness=-1)
-
-    # You can add more fun things (moving rectangle, text, etc.) if you want
-    return frame
-
-
-def simulate_robot_along_path(global_path, step_size=10.0):
-    """
-    Generator that walks a virtual robot along the global_path, returning
-    successive (x, y, theta) positions.
-
-    Args:
-        global_path: Nx2 array of waypoints (A* output)
-        step_size:   distance [mm] moved per step
-
-    Yields:
-        x, y, theta: robot pose in map coords
-    """
-    # Start at first point
-    x = float(global_path[0, 0])
-    y = float(global_path[0, 1])
-    theta = 0.0
-    idx = 0
-
-    while True:
-        if idx >= len(global_path) - 1:
-            # stay at the final goal and keep yielding pose
-            yield x, y, theta
-            continue
-
-        x_target = float(global_path[idx + 1, 0])
-        y_target = float(global_path[idx + 1, 1])
-
-        dx = x_target - x
-        dy = y_target - y
-        dist = np.hypot(dx, dy)
-
-        if dist < step_size:
-            # jump to the next waypoint
-            x, y = x_target, y_target
-            idx += 1
-        else:
-            # move step_size towards target
-            x += step_size * dx / dist
-            y += step_size * dy / dist
-
-        # heading along current segment
-        if dist > 1e-9:
-            theta = np.arctan2(dy, dx)
-
-        yield x, y, theta
-
-def make_world_to_pixel_mapper(global_path, img_width, img_height, margin_ratio=0.05):
-    """
-    Build a simple linear mapper from world coords (mm) to image pixels,
-    just for visualization in this demo.
-
-    We map the bounding box of global_path into the image, leaving a margin.
-    """
-    xs = global_path[:, 0]
-    ys = global_path[:, 1]
-
-    xmin, xmax = xs.min(), xs.max()
-    ymin, ymax = ys.min(), ys.max()
-
-    # Add small padding in world space to avoid clamping
-    dx = xmax - xmin
-    dy = ymax - ymin
-    if dx == 0:
-        dx = 1.0
-    if dy == 0:
-        dy = 1.0
-
-    margin_x = img_width * margin_ratio
-    margin_y = img_height * margin_ratio
-
-    def world_to_pix(xw, yw):
-        # Normalize to [0,1]
-        nx = (xw - xmin) / dx
-        ny = (yw - ymin) / dy
-
-        # Scale into image with margins
-        px = margin_x + nx * (img_width  - 2 * margin_x)
-        py = margin_y + ny * (img_height - 2 * margin_y)
-
-        # IMPORTANT: image y axis goes downward, but our mapping
-        # above assumes y grows upward, so flip:
-        py = img_height - py
-
-        return px, py
-
-    return world_to_pix
-
-def world_to_pix_with_H(points_world, H_inv):
-    pts_world = np.asarray(points_world, dtype=np.float32).reshape(-1, 1, 2)
-    pts_pix = cv2.perspectiveTransform(pts_world, H_inv).reshape(-1, 2)
-    return pts_pix[:,0], pts_pix[:,1]
-
-
-# ----------------------------------------------------------------------
-# MAIN DEMO LOOP
-# ----------------------------------------------------------------------
