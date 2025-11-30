@@ -19,9 +19,9 @@ NO_CAMERA_MODE = False
 
 # Thymio calibration settings
 GLOB_NAV_EPSILON = 90
-ERROR_TOLERANCE = 15
+WAYPOINT_POS_TOLERANCE = 15
 NUDGE_LENGTH = 110
-SOFT_KIDNAPPING_THRESHOLD = 15
+SOFT_KIDNAPPING_THRESHOLD = 20
 HARD_KIDNAPPING_THRESHOLD = 200
 
 # Kalman settings
@@ -38,7 +38,7 @@ camPose: np.ndarray = np.zeros(3)
 estPose: np.ndarray = np.zeros(3)
 newCamPose: bool = None
 robotSeen: bool = False
-hardKidnapping: np.array = None
+hardKidnapping: np.ndarray = None
 
 # Threads
 
@@ -46,7 +46,8 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
     # Shared globals
 
-    global ERROR_TOLERANCE, TS, Q, R_cam, P, thymio, camPose, estPose, newCamPose, hardKidnapping
+    global WAYPOINT_POS_TOLERANCE, NUDGE_LENGTH, SOFT_KIDNAPPING_THRESHOLD, HARD_KIDNAPPING_THRESHOLD, TS
+    global Q, R_cam, P, thymio, camPose, estPose, newCamPose, hardKidnapping
     
     # Local navigation state machine
 
@@ -90,7 +91,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
             match state:
 
                 case State.FOLLOW:
-                    if np.linalg.norm([path[1][0] - thymioPose[0], path[1][1] - thymioPose[1]]) < ERROR_TOLERANCE:
+                    if np.linalg.norm([path[1][0] - thymioPose[0], path[1][1] - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                         if path.shape[0] > 2:
                             previousWaypoint = path[0]
                             path = path[1:]
@@ -116,7 +117,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                         state = State.EXIT_PATH
 
                 case State.EXIT_PATH:
-                    if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
+                    if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                         thymio.probe_obstacle(path)
                         state = State.PROBE_OBSTACLE
 
@@ -134,30 +135,29 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
                 case State.NUDGE_FORWARD:
                     if index is not None:
-                        if np.linalg.norm([intersect[0] - thymioPose[0], intersect[1] - thymioPose[1]]) < ERROR_TOLERANCE:
+                        if np.linalg.norm([intersect[0] - thymioPose[0], intersect[1] - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                             path = path[index:]
                             thymio.set_target(path[1][0], path[1][1])
                             state = State.FOLLOW
                     else:
-                        if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < ERROR_TOLERANCE:
+                        if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                             thymio.probe_obstacle(path)
                             state = State.PROBE_OBSTACLE
 
             # Run Kalman filter
-            if state != State.FOLLOW:
-                R_cam =  np.diag([0.001, 0.001, 0.001])
-            else:
-                R_cam =  np.diag([0.0005, 0.0005, 0.0005])
             est, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose and robotSeen, TS, Q, R_cam)
             estPose = est.flatten()
             newCamPose = False
 
-            # Update position only if off by more than 30 mm (avoid unnecessary rollback)
-
+            # Early return if in avoidance mode
+            if state != State.FOLLOW:
+                return
+            
+            # Detect soft and hard kidnapping cases
             errorNorm = np.linalg.norm((np.round(estPose[:2]) - thymioPose[:2]))
             if errorNorm > HARD_KIDNAPPING_THRESHOLD:
                 print(f"Hard kidnapping, recomputing path")
-                hardKidnapping = camPose.copy()
+                hardKidnapping = camPose
                 break
             elif errorNorm > SOFT_KIDNAPPING_THRESHOLD:
                 print(f"Soft kidnapping, correcting position by ({errorNorm} mm)")
@@ -437,8 +437,8 @@ def main_thread() -> None:
         err_val = np.linalg.norm(pos_odom - pos_cam)   # [mm]
 
         # Clamp error value for better visualization
-        if err_val > 2 * ERROR_TOLERANCE:
-            err_val = 2 * ERROR_TOLERANCE
+        if err_val > 2 * WAYPOINT_POS_TOLERANCE:
+            err_val = 2 * WAYPOINT_POS_TOLERANCE
 
         err_hist.append(err_val)
 
