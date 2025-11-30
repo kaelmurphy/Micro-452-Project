@@ -386,3 +386,78 @@ def compute_global_path(
     global_path = np.array([node_coords_eps[i] for i in path_indices], dtype=float)
 
     return global_path
+
+def compute_global_path_with_debug(
+    map_array: np.ndarray,
+    epsilon_mm: float = 20.0,
+):
+    """
+    Same as compute_global_path, but also returns all intermediate
+    data needed for plotting / debugging.
+
+    Returns
+    -------
+    global_path : np.ndarray  (shape (M, 2))
+    debug : dict with keys:
+        - polygons_ccw_raw
+        - polygons_ccw_eps
+        - special_points
+        - node_coords
+        - node_labels
+        - neighbors
+        - path_indices
+        - epsilon_mm
+    """
+    # 1) Build DataFrame
+    df = _df_from_input(map_array)
+
+    # 2) Build (CCW) polygons and special points
+    polygons_ccw_raw, special_points = _build_polygons_and_special_points(df)
+
+    # 3) Inflate obstacles
+    EPSILON = float(epsilon_mm)
+    polygons_ccw_eps = inflate_polygons(polygons_ccw_raw, EPSILON, shrink_outer=True)
+
+    # 4) Build shapely polygons for inflated world
+    world_poly_eps = Polygon(polygons_ccw_eps["poly0"])
+    obstacle_polys_eps = [
+        Polygon(ring) for pid, ring in polygons_ccw_eps.items() if pid != "poly0"
+    ]
+
+    # 5) Build nodes for inflated world
+    node_coords_eps, node_labels_eps, start_idx_eps, goal_idx_eps = \
+        build_nodes_from_polygons(polygons_ccw_eps, special_points)
+
+    # 6) Build neighbors (visibility graph)
+    neighbors_eps = build_neighbors(node_coords_eps, world_poly_eps, obstacle_polys_eps)
+
+    print("\n=== NEIGHBOR COUNTS ===")
+    for i, nbrs in enumerate(neighbors_eps):
+        print(f"Node {i:2d} ({node_labels_eps[i]:8s}) has {len(nbrs)} neighbors")
+
+    # 7) Run A*
+    path_indices, explored_nodes, op_count = astar(
+        neighbors_eps, node_coords_eps, start_idx_eps, goal_idx_eps
+    )
+
+    if path_indices is None:
+        raise RuntimeError("No path found by A* for the given map and inflation radius.")
+
+    print("Path labels:", [node_labels_eps[i] for i in path_indices])
+    print("Path coordinates:", [node_coords_eps[i] for i in path_indices])
+
+    # 8) Turn into NumPy array: global_path
+    global_path = np.array([node_coords_eps[i] for i in path_indices], dtype=float)
+
+    debug = {
+        "polygons_ccw_raw": polygons_ccw_raw,
+        "polygons_ccw_eps": polygons_ccw_eps,
+        "special_points": special_points,
+        "node_coords": node_coords_eps,
+        "node_labels": node_labels_eps,
+        "neighbors": neighbors_eps,
+        "path_indices": path_indices,
+        "epsilon_mm": EPSILON,
+    }
+
+    return global_path, debug
