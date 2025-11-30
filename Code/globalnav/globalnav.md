@@ -155,7 +155,7 @@ We allow segment–obstacle tangency (parallel to edges) since obstacles are alr
 
 Helper functions:
 
-- `segment_visibility(i, j)`
+- `segment_visibile()`
 
 - `euclidean_distance(i, j)`
 
@@ -234,3 +234,51 @@ Observations:
 - The experiment confirms that Thymio’s encoder-based odometry and our coordinate transformations function correctly.
 
 - Accurate localization requires vision-based pose estimation, integrated later in the project.
+
+### 9. File structure
+
+globalnav.py — core planner
+
+- - Implements the whole planning pipeline:
+- Parsing inputs → building polygons & special points
+- Orientation normalization (CCW)
+- Inflation (ε buffer)
+- Node extraction (vertices + start/goal)
+- Visibility graph construction
+- A* search (astar / compute_global_path / compute_global_path_with_debug)
+
+Exposes:
+compute_global_path(map_array, epsilon_mm) — returns path
+compute_global_path_with_debug(map_array, epsilon_mm) — returns (global_path, debug) with all intermediate data for plotting
+
+globalnav_plot.py — map + A* plotting helper
+
+Calls compute_global_path_with_debug(...) to compute the path and the debug dict (polygons, nodes, neighbors, path indices).
+Draws everything: inflated polygons, A* path (red), odometry/camera lines, arrows, legend.
+Returns handles you can later update (lines, patches, arrows). It already inserts epsilon into legend text.
+
+### Call of A* once:
+A* only once: how it's enforced now (and why it matters)
+The planner (A*) is executed by compute_global_path_with_debug() which is called inside setup_globalnav_plot(...).
+dashboard.setup_dashboard() calls setup_globalnav_plot(...) once when the GUI/plot is created. The function returns:
+global_path (the A* waypoints)
+A debug dict with polygons, nodes, path_indices, epsilon, etc.
+
+This means:
+The path plotted and the robot trajectory are computed from the same A* run.
+No duplicated calls to A* exist across the runtime that could yield different results.
+The epsilon value passed into setup_globalnav_plot() becomes the single source of truth for inflation and therefore for the robot coordinates on the map and in the plot legend.
+
+Why this is important
+
+Ensures the robot uses the same configuration-space inflation and path as the visualised map.
+Avoids mismatches and confusion when comparing robot position vs planned path (e.g. if two calls had different epsilons the map vs robot could disagree).
+Keeps consistent legend output and debugging information.
+
+"During dashboard/setup we compute a single global path with A* (via compute_global_path_with_debug). The computed path is returned to the dashboard and reused by the robot control/demo. This guarantees that the displayed map, visualization, and robot execution all refer to the same path and precisely the same inflation radius (ε) — avoiding any mismatch between plotted and actually-followed routes."
+
+### 10. GUI
+dashboard.py — GUI / visualization (camera + map + covariances)
+
+Builds the full dashboard: simulated camera (left), global nav plot (middle), and covariance/error plots (right).
+Calls setup_globalnav_plot() during setup to compute the A* path and get all map handles. The returned global_path is stored and reused by the dashboard and the demo logic.
