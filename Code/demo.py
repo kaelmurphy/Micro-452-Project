@@ -19,9 +19,9 @@ NO_CAMERA_MODE = False
 
 # Thymio calibration settings
 GLOB_NAV_EPSILON = 90
-WAYPOINT_POS_TOLERANCE = 15
+WAYPOINT_POS_TOLERANCE = 55
 NUDGE_LENGTH = 110
-SOFT_KIDNAPPING_THRESHOLD = 20
+SOFT_KIDNAPPING_THRESHOLD = 30
 HARD_KIDNAPPING_THRESHOLD = 200
 
 # Kalman settings
@@ -61,11 +61,10 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
     # Connect Thymio
 
-    with Thymio(path[0][0], path[0][1], theta0, THYMIO_482_CALIBRATION) as thymio:
+    with Thymio(path[0][0], path[0][1], theta0, path[1][0], path[1][1], THYMIO_482_CALIBRATION) as thymio:
 
         # Initialize motor control and local navigation
 
-        thymio.set_target(path[1][0], path[1][1])
         state: State = State.FOLLOW
         t0 = perf_counter()
 
@@ -151,7 +150,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
             # Early return if in avoidance mode
             if state != State.FOLLOW:
-                return
+                continue
             
             # Detect soft and hard kidnapping cases
             errorNorm = np.linalg.norm((np.round(estPose[:2]) - thymioPose[:2]))
@@ -199,7 +198,6 @@ def main_thread() -> None:
     # Else capture first image
 
     else:
-        #coords, theta0, H = getVisionCoords(timeout=None, showDisplay=True)
         coords, theta0, H, board_corners_pix = getVisionCoords(timeout=None, showDisplay=True)
         print(coords, "Initial orientation: {:.2f}".format(theta0))
         #Calculate inverse homography for later use

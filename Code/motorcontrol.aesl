@@ -21,8 +21,8 @@ var y_um = 0
 var theta = {THETA0}
 
 # Reference
-var r_x_mm = 0
-var r_y_mm = 0
+var r_x_mm = {X1}
+var r_y_mm = {Y1}
 
 # Cartesian error
 var e_x_mm = 0
