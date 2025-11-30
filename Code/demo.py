@@ -27,9 +27,9 @@ HARD_KIDNAPPING_THRESHOLD = 200
 # Kalman settings
 
 TS = 0.1
-Q = np.diag([0.000001, 0.000001, 1.2e-2])
-R_cam = np.diag([0.0005, 0.0005, 0.0005])
-P = np.diag([1.0, 1.0, 0.5])
+Q = np.diag([0.04, 0.04, 7.5e-5])
+R_cam = np.diag([0.05, 0.05, 1.2e-4])
+P = np.diag([0.1, 0.1, 0.1])
 
 # Globals
 
