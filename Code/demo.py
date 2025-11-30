@@ -15,7 +15,7 @@ import cv2
 # Testing settings
 
 NO_THYMIO_MODE = False
-NO_CAMERA_MODE = False
+NO_CAMERA_MODE = True
 
 # Thymio calibration settings
 GLOB_NAV_EPSILON = 90

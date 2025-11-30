@@ -150,22 +150,23 @@ e &= \sqrt{\Delta x^2 + \Delta y^2} \\
 \end{align}
 $$
 
-Then we limit the domain of definition such that $e \in [0, e_{max}]$.
+Then we limit the domain of definition such that $e \in [0, e_{max}]$ and $\varepsilon \in [-\pi, \pi[$.
 
 $$
-\begin{equation}
-e \rightarrow \begin{cases}
+\begin{align}
+e &\rightarrow \begin{cases}
 0 &\text{ if } e < 0 \\
 e &\text{ if } 0 < e \leq e_{max} \\
 e_{max} &\text{ else}
-\end{cases}
-\end{equation}
+\end{cases} \\
+\varepsilon &\rightarrow ((\varepsilon + \pi) \mod 2 \pi) - \pi
+\end{align}
 $$
 
 Then, assuming $e \in [0, e_{max}]$ and $\varepsilon \in [-\pi, \pi[$, the controller is modified as :
 $$
 \begin{align}
-v &= k_e \cdot e \cdot (\pi - |\varepsilon|) \\
+v &= k_e \cdot e \cdot \left(\pi - |\varepsilon|\right) \\
 \omega &= k_\varepsilon \cdot \varepsilon
 \end{align}
 $$
@@ -182,19 +183,19 @@ The custom controller follows the path **one waypoint at a time**.
     <img src="local-nav-path-following.png" alt="path-following" width="200"/>
 </p>
 
-Knowing the path was generated with a visibility graph, we can assume each vertex is close to an exclusion zone. The avoidance should hence be done on the **path exterior** :
+Knowing the path was generated with a visibility graph, we can assume each vertex is close to an exclusion zone. The avoidance should hence be done on the **path exterior**, while considering that the robot is not perfectly on the path. It must intersect it's trajectory to the goal to continue :
 
 <p align="center">
     <img src="local-nav-avoidance-strategy.png" alt="avoidance-strategy" width="200"/>
 </p>
 
-When detecting the obstacle with the horizontal proximity sensors, the avoidance trajectory should be pushed away from the obstacle, **tangeant** to the obstacle's **potential field**.
+## State machine
+
+When detecting the obstacle with the horizontal proximity sensors, the avoidance trajectory should be pushed away from the obstacle, **tangeant** to it. This approach is simillar to a **potential field** repulsing the path.
 
 <p align="center">
     <img src="local-nav-potential-field.png" alt="potential-field" width="400"/>
 </p>
-
-## State machine
 
 The proximity sensors being far ahead of the rotation center of the robot, directly implementing a potential field often lead to the robot to touch the obstacle while trying to avoid it. To prevent this, the robot should **probe** for the obstacle **tangeant**, then **nudge one robot length**. It should repeat these two steps until the nudge step intersect with the original path.
 
