@@ -20,8 +20,8 @@ NO_CAMERA_MODE = False
 # Thymio calibration settings
 GLOB_NAV_EPSILON = 90
 WAYPOINT_POS_TOLERANCE = 55
-NUDGE_LENGTH = 110
-SOFT_KIDNAPPING_THRESHOLD = 30
+NUDGE_LENGTH = 160
+SOFT_KIDNAPPING_THRESHOLD = 15
 HARD_KIDNAPPING_THRESHOLD = 200
 
 # Kalman settings
@@ -456,10 +456,12 @@ def main_thread() -> None:
     with open('log.csv', 'w') as log_file:
         log_file.write(log)
 
+    plt.close('all')
+    plt.ioff()
     plot_covariance_history(TS)
     plot_innovation_history(TS)
     plot_error_vs_sigma(TS)
-    plt.show()
+    plt.show(block=True)
 
 if __name__ == '__main__':
 
