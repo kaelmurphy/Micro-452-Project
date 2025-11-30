@@ -52,7 +52,7 @@ def ensure_ccw(ring: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
 def _df_from_input(map_array: np.ndarray) -> pd.DataFrame:
     """
     Convert input NumPy array (or DataFrame) to a clean DataFrame with
-    columns: id, type, x, y.
+    columns: type, id, label, x, y.
     """
     if isinstance(map_array, pd.DataFrame):
         df = map_array.copy()
@@ -159,6 +159,7 @@ def inflate_polygons(
             continue
 
         # 1) Inflate obstacles (all polygons except poly0)
+        #preserves sharp edges and limits vertex growth.
         buffered = poly.buffer(epsilon, join_style=2, resolution=1)
 
         # 2) Handle possible MultiPolygon (rare for nice convex shapes)
