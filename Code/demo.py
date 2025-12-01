@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from enum import Enum
-from localnav import *
+from thymio import *
 from globalnav import *
 from Kalman2 import *
 from globalnav_plot import ARROW_LENGTH

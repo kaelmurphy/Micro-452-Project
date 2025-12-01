@@ -18,9 +18,9 @@ def segments_intersection_point(s1: np.ndarray, s2: np.ndarray) -> np.ndarray | 
     if abs(r_cross_s) < 1e-9:
         return None
 
-    q_minus_p = s2[0] - s1[0]
-    t = cross2d(q_minus_p, s) / r_cross_s
-    u = cross2d(q_minus_p, r) / r_cross_s
+    diff = s2[0] - s1[0]
+    t = cross2d(diff, s) / r_cross_s
+    u = cross2d(diff, r) / r_cross_s
 
     if 0 <= t <= 1 and 0 <= u <= 1:
         return s1[0] + t * r
@@ -43,9 +43,9 @@ def lsb_to_rad(lsb: int) -> float:
 
 class Calibration():
 
-    def __init__(self, scale: int, track: int) -> None:
-        self.scale: int = scale
-        self.track: int = track
+    def __init__(self, kD: int, kTheta: int) -> None:
+        self.kD: int = kD
+        self.kTheta: int = kTheta
 
 class Thymio():
 
@@ -64,16 +64,16 @@ class Thymio():
         self.cal = calibration
         with open('motorcontrol.aesl') as file:
             self.program = file.read().format(
-                X0 = self.x,
-                Y0 = self.y,
-                X1 = int(np.round(x1)),
-                Y1 = int(np.round(y1)),
-                THETA0 = rad_to_lsb(self.theta),
-                SCALE = self.cal.scale,
-                TRACK = self.cal.track
+                X0      = self.x,
+                Y0      = self.y,
+                X1      = int(np.round(x1)),
+                Y1      = int(np.round(y1)),
+                THETA0  = rad_to_lsb(self.theta),
+                K_D     = self.cal.kD,
+                K_THETA = self.cal.kTheta
             )
 
-        # Initial commands
+        # Initial timestamp and commands
         self.t: float = 0
         self.v: int = 0
         self.omega: float = 0
@@ -112,7 +112,7 @@ class Thymio():
         if error is not None:
             raise RuntimeError(f'Error {error['error_code']}')
     
-        # Pump old events
+        # Pump old events that may be remaining from last session
         while self.t > 1.0:
             aw(self.client.sleep(0.01))
 
