@@ -309,15 +309,34 @@ def setup_dashboard(
     # RIGHT TOP: KALMAN COVARIANCE
     # ------------------------------------------------------------------
     # Shows the diagonal of the EKF covariance matrix P (σx², σy², σθ²) over time.
+
+    # Left y-axis:   σx², σy²    (mm²)
+    # Right y-axis:  σθ²         (rad²)
+
     ax_cov.set_title("EKF covariance (diagonal)")
     ax_cov.set_xlabel("time [s]")
-    ax_cov.set_ylabel(r"$\mathrm{variance}\;[\mathrm{mm}^2,\;\mathrm{rad}^2]$")
+    # Create a twin axis on the right
+    ax_cov_theta = ax_cov.twinx()
 
-    line_sigx, = ax_cov.plot([], [], label="σx²")
-    line_sigy, = ax_cov.plot([], [], label="σy²")
-    line_sigtheta, = ax_cov.plot([], [], label="σθ²")
+    # Left-axis lines: σx², σy²
+    line_sigx, = ax_cov.plot([], [], label=r"$\sigma_x^2$")
+    line_sigy, = ax_cov.plot([], [], label=r"$\sigma_y^2$")
 
-    ax_cov.legend(loc="upper right")
+    ax_cov.set_ylabel(r"$\sigma_x^2,\,\sigma_y^2\;\;[\mathrm{mm}^2]$")
+    ax_cov.grid(True, alpha=0.3)
+
+    # Right-axis line: σθ²
+    line_sigtheta, = ax_cov_theta.plot([], [], linestyle="--",
+                                    color="tab:red",
+                                    label=r"$\sigma_\theta^2$")
+
+    ax_cov_theta.set_ylabel(r"$\sigma_\theta^2\;[\mathrm{rad}^2]$")
+
+    # Combined legend (collect from both axes)
+    lines = [line_sigx, line_sigy, line_sigtheta]
+    labels = [l.get_label() for l in lines]
+    ax_cov.legend(lines, labels, loc="upper right")
+
 
     # ------------------------------------------------------------------
     # RIGHT BOTTOM: POSITION ERROR (ODOM vs CAMERA)
