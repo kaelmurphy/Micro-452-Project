@@ -57,11 +57,11 @@ def _df_from_input(map_array: np.ndarray) -> pd.DataFrame:
     if isinstance(map_array, pd.DataFrame):
         df = map_array.copy()
     else:
-        # Expecting shape (N, 4): [id, type, x, y]
+        # Expecting shape (N, 5): [type, id, label, x, y]
         if not isinstance(map_array, np.ndarray):
             raise TypeError("map_array must be a NumPy array or a pandas DataFrame.")
-        if map_array.ndim != 2 or map_array.shape[1] < 4:
-            raise ValueError("map_array must have shape (N, 4) with columns [id, type, x, y].")
+        if map_array.ndim != 2 or map_array.shape[1] != 5:
+            raise ValueError("map_array must have shape (N, 5) with columns [type, id, label, x, y].")
 
         df = pd.DataFrame(map_array, columns=["type", "id", "label", "x", "y"])
 
@@ -130,9 +130,6 @@ def _build_polygons_and_special_points(
 
     return polygons_ccw, special_points
 
-
-
-
 # 3. Polygon inflation
 def inflate_polygons(
     polygons_ccw: Dict[str, List[Tuple[float, float]]],
@@ -178,7 +175,6 @@ def inflate_polygons(
 
     return inflated
 
-
 # 4. Building graph nodes from polygons
 def build_nodes_from_polygons(
     polygons_ccw: Dict[str, List[Tuple[float, float]]],
@@ -223,7 +219,7 @@ def build_nodes_from_polygons(
     logger.debug("start_idx: %d, goal_idx: %d", start_idx, goal_idx)
 
 
-    return node_coords, node_labels, start_idx, goal_idx 
+    return node_coords, node_labels, start_idx, goal_idx
 
 # 5. Visibility graph construction
 def segment_visible(p, q, world_poly, obstacle_polys):
@@ -251,12 +247,10 @@ def segment_visible(p, q, world_poly, obstacle_polys):
 
     return True
 
-
 def euclidean_distance(p, q):
     dx = p[0] - q[0]
     dy = p[1] - q[1]
     return math.hypot(dx, dy)
-
 
 def build_neighbors(node_coords, world_poly, obstacle_polys):
     """
@@ -366,7 +360,6 @@ def astar(neighbors, node_coords, start_idx, goal_idx):
         logger.info("Path node indices: %s", path_indices)
 
     return path_indices, explored, operation_count
-
 
 def compute_global_path(
     map_array: np.ndarray,
