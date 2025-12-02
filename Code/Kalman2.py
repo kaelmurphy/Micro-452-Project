@@ -166,7 +166,7 @@ def plot_covariance_history(Ts):
     ax1.set_ylabel("Variance of x,y")
     ax1.grid(True)
     ax2 = ax1.twinx()
-    line_theta, = ax2.plot(t, var_theta, linestyle="--", label="Var(theta)")
+    line_theta, = ax2.plot(t, var_theta, label="Var(theta)", color = 'green')
     ax2.set_ylabel("Variance of theta")
     lines = [line_x, line_y, line_theta]
     labels = [line.get_label() for line in lines]
@@ -184,31 +184,58 @@ def plot_innovation_history(Ts):
     Uses global innovlog and inovusedlog.
 
     """
-    global innovlog, inovusedlog                       
+    global innovlog, inovusedlog
 
-    if len(innovlog) == 0:                            
-        print("No innovation data to plot.")           
-        return                                       
+    # If there are no innovations at all, exit early.
+    if len(innovlog) == 0:
+        print("No innovation data to plot.")
+        return
 
-    innov_array = np.array([y.flatten() for y in innovlog]) 
-    N = innov_array.shape[0]                          
-    t = np.arange(N) * Ts                             
+    # Convert innovation list into an array shape (N, 3)
+    innov_array = np.array([y.flatten() for y in innovlog])
+    N = innov_array.shape[0]
 
-    mask = np.array(inovusedlog, dtype=bool)           
+    # Create time vector in seconds
+    t = np.arange(N) * Ts
 
-    if not np.any(mask):                              
-        print("No camera updates were used; nothing to plot.")  
-        return                                         
+    # Mask where camera was used
+    mask = np.array(inovusedlog, dtype=bool)
 
-    plt.figure()                                      
-    plt.plot(t[mask], innov_array[mask, 0], "o", label="innovation x")      
-    plt.plot(t[mask], innov_array[mask, 1], "o", label="innovation y")      
-    plt.plot(t[mask], innov_array[mask, 2], "o", label="innovation theta")  
-    plt.grid(True)                                    
-    plt.title("Innovation (measurement residual) at camera update times")   
-    plt.xlabel("Time [s]")                             
-    plt.ylabel("Innovation")                           
-    plt.legend()                                         
+    if not np.any(mask):
+        print("No camera updates used; nothing to plot.")
+        return
+
+    # Extract individual series
+    innov_x = innov_array[:, 0]
+    innov_y = innov_array[:, 1]
+    innov_theta = innov_array[:, 2]
+
+    # ---- FIGURE + AXIS SETUP ----
+    fig, ax1 = plt.subplots()
+
+    # LEFT AXIS → x & y innovations
+    line_x = ax1.plot(t[mask], innov_x[mask], label="innovation x")[0]
+    line_y = ax1.plot(t[mask], innov_y[mask], label="innovation y")[0]
+
+    ax1.set_xlabel("Time [s]")
+    ax1.set_ylabel("Innovation (x, y)")
+    ax1.grid(True)
+
+    # RIGHT AXIS → theta innovations
+    ax2 = ax1.twinx()
+    line_theta = ax2.plot(
+        t[mask], innov_theta[mask], color="purple", label="innovation theta"
+    )[0]
+
+    ax2.set_ylabel("Innovation (theta)")
+
+    # ---- COMBINED LEGEND ----
+    lines = [line_x, line_y, line_theta]
+    labels = [line.get_label() for line in lines]
+    ax1.legend(lines, labels, loc="upper left")
+
+    # ---- TITLE ----
+    plt.title("Innovation history (x,y on left axis — theta on right axis)")                        
 
 
 # ==========================
