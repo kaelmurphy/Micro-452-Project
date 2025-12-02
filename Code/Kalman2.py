@@ -159,17 +159,20 @@ def plot_covariance_history(Ts):
     var_y = P_array[:, 1, 1]                           
     var_theta = P_array[:, 2, 2]                       
 
-    plt.figure()                                       
-    plt.plot(t, var_x, label="Var(x)")                 
-    plt.plot(t, var_y, label="Var(y)")                 
-    plt.plot(t, var_theta, label="Var(theta)")         
-    plt.grid(True)                                     
-    plt.title("EKF covariance diagonal over time")     
-    plt.xlabel("Time [s]")                             
-    plt.ylabel("Variance")                             
-    plt.legend()                                         
-
-
+    fig, ax1 = plt.subplots()
+    line_x, = ax1.plot(t, var_x, label="Var(x)")
+    line_y, = ax1.plot(t, var_y, label="Var(y)")
+    ax1.set_xlabel("Time [s]")
+    ax1.set_ylabel("Variance of x,y")
+    ax1.grid(True)
+    ax2 = ax1.twinx()
+    line_theta, = ax2.plot(t, var_theta, linestyle="--", label="Var(theta)")
+    ax2.set_ylabel("Variance of theta")
+    lines = [line_x, line_y, line_theta]
+    labels = [line.get_label() for line in lines]
+    ax1.legend(lines, labels, loc="upper left")
+    plt.title("EKF covariance diagonal over time (two y-axes)")
+                                
 # ==========================
 # Innovation History
 # ==========================
@@ -267,7 +270,7 @@ def plot_error_vs_sigma(Ts):
     plt.grid(True)                                    
     plt.title("Error in x vs ±2σ_x")                   
     plt.xlabel("Time [s]")                             
-    plt.ylabel("Error [m]")                            
+    plt.ylabel("Error [mm]")                            
     plt.legend()                                        
 
     # Plot y error vs ±2 sigma_y
@@ -278,7 +281,7 @@ def plot_error_vs_sigma(Ts):
     plt.grid(True)                                     
     plt.title("Error in y vs ±2σ_y")                  
     plt.xlabel("Time [s]")                             
-    plt.ylabel("Error [m]")                            
+    plt.ylabel("Error [mm]")                            
     plt.legend()                                        
 
     # Plot theta error vs ±2 sigma_theta
