@@ -59,20 +59,20 @@ onevent motor
 
 	# Compute wheel increment
 	if abs motor.left.speed >= 10 then
-	call math.muldiv(d_l_um, motor.left.speed, {SCALE}, 10000)
+	call math.muldiv(d_l_um, motor.left.speed, {K_D}, 10000)
 	else
 		d_l_um = 0
 	end
 	
 	if abs motor.right.speed >= 10 then
-	call math.muldiv(d_r_um, motor.right.speed, {SCALE}, 10000)
+	call math.muldiv(d_r_um, motor.right.speed, {K_D}, 10000)
 	else
 		d_r_um = 0
 	end
 
 	# Compute linear and angular increments
 	d_s_um = (d_l_um + d_r_um) >> 1
-	call math.muldiv(d_theta, d_r_um - d_l_um, {TRACK}, 10000)
+	call math.muldiv(d_theta, d_r_um - d_l_um, {K_THETA}, 10000)
 
 	# Integrate heading
 	theta_mid = theta + (d_theta >> 1)

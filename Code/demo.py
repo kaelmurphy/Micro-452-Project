@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from enum import Enum
-from localnav import *
+from thymio import *
 from globalnav import *
 from Kalman2 import *
 from globalnav_plot import ARROW_LENGTH
@@ -18,18 +18,19 @@ NO_THYMIO_MODE = False
 NO_CAMERA_MODE = False
 
 # Thymio calibration settings
+
 GLOB_NAV_EPSILON = 90
-WAYPOINT_POS_TOLERANCE = 55
+WAYPOINT_POS_TOLERANCE = 20
 NUDGE_LENGTH = 160
-SOFT_KIDNAPPING_THRESHOLD = 15
+SOFT_KIDNAPPING_THRESHOLD = 8
 HARD_KIDNAPPING_THRESHOLD = 200
 
 # Kalman settings
 
-TS = 0.1
-Q = np.diag([0.000001, 0.000001, 1.2e-2])
-R_cam = np.diag([0.0005, 0.0005, 0.0005])
-P = np.diag([1.0, 1.0, 0.5])
+TS = 0.2
+Q = np.diag([0.2, 0.2, 1.6e-3])
+R_cam = np.diag([0.76, 0.76, 7e-4])
+P = np.diag([0.01, 0.01, 0.01])
 
 # Globals
 
@@ -52,7 +53,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
     # Local navigation state machine
 
     class State(Enum):
-        FOLLOW          = 0
+        FOLLOW_PATH          = 0
         FACE_AWAY       = 1
         EXIT_PATH       = 2
         PROBE_OBSTACLE  = 3
@@ -65,7 +66,7 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
         # Initialize motor control and local navigation
 
-        state: State = State.FOLLOW
+        state: State = State.FOLLOW_PATH
         t0 = perf_counter()
 
         # Until path is completed
@@ -89,7 +90,10 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
 
             match state:
 
-                case State.FOLLOW:
+                case State.FOLLOW_PATH:
+
+                    # When distance to waypoint is below threshold, validate and go to next waypoint
+
                     if np.linalg.norm([path[1][0] - thymioPose[0], path[1][1] - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                         if path.shape[0] > 2:
                             previousWaypoint = path[0]
@@ -97,18 +101,30 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                             thymio.set_target(path[1][0], path[1][1])
                         else:
                             state = State.END
+
+                    # If an obstacle is detected by Thymio, enter avoidance state machine
+
                     elif thymio.is_blocked():
                         avoidancePath = path
                         avoidancePath[0] = thymioPose[:2]
+
+                        # Choose avoidance direction with respect to path shape
+
                         if path.shape[0] == 2:
                             directionPath = np.insert(path, 0, previousWaypoint, axis=0)
                             thymio.set_avoidance_direction(trajectory_direction(directionPath))
                         else:
                             thymio.set_avoidance_direction(trajectory_direction(path))
+
+                        # Face away from obstacle
+
                         thymio.probe_obstacle(path)
                         state = State.FACE_AWAY
 
                 case State.FACE_AWAY:
+
+                    # When the obstacle is out of sight exit path with a nudge forward
+
                     if thymio.is_clear():
                         x = int(thymioPose[0] + NUDGE_LENGTH * np.cos(thymioPose[2]))
                         y = int(thymioPose[1] + NUDGE_LENGTH * np.sin(thymioPose[2]))
@@ -116,11 +132,17 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                         state = State.EXIT_PATH
 
                 case State.EXIT_PATH:
+
+                    # When path is exited, enter avoidance loop, by probing the obstacle direction
+
                     if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                         thymio.probe_obstacle(path)
                         state = State.PROBE_OBSTACLE
 
                 case State.PROBE_OBSTACLE:
+
+                    # When obstacle is out of sight, nudge forward
+
                     if thymio.is_clear():
                         x = int(thymioPose[0] + NUDGE_LENGTH * np.cos(thymioPose[2]))
                         y = int(thymioPose[1] + NUDGE_LENGTH * np.sin(thymioPose[2]))
@@ -133,36 +155,50 @@ def thymio_thread(path: np.ndarray, theta0: float) -> None:
                         state = State.NUDGE_FORWARD
 
                 case State.NUDGE_FORWARD:
+
+                    # If current nudge intersect path, move to intersection then follow global path
+
                     if index is not None:
                         if np.linalg.norm([intersect[0] - thymioPose[0], intersect[1] - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                             path = path[index:]
                             thymio.set_target(path[1][0], path[1][1])
-                            state = State.FOLLOW
+                            state = State.FOLLOW_PATH
+
+                    # Else keep probing and turning around obstacle
+
                     else:
                         if thymio.is_blocked() or np.linalg.norm([x - thymioPose[0], y - thymioPose[1]]) < WAYPOINT_POS_TOLERANCE:
                             thymio.probe_obstacle(path)
                             state = State.PROBE_OBSTACLE
 
             # Run Kalman filter
+
             est, P = ekf_step(thymioPose, P, v, omega, camPose, newCamPose and robotSeen, TS, Q, R_cam)
             estPose = est.flatten()
             newCamPose = False
 
-            # Early return if in avoidance mode
-            if state != State.FOLLOW:
+            # Early return if in avoidance mode, first finish avoidance
+
+            if state != State.FOLLOW_PATH:
                 continue
+            else:
+                errorNorm = np.linalg.norm((np.round(estPose[:2]) - thymioPose[:2]))
             
-            # Detect soft and hard kidnapping cases
-            errorNorm = np.linalg.norm((np.round(estPose[:2]) - thymioPose[:2]))
+            # If odometry to Kalman estimation difference is above hard kidnapping thresold, set flag and end thread
+            
             if errorNorm > HARD_KIDNAPPING_THRESHOLD:
                 print(f"Hard kidnapping, recomputing path")
                 hardKidnapping = camPose
                 break
+
+            # If odometry to Kalman estimation difference is above soft kidnapping thresold, correct Thymio position
+            # NOTE: not updating Thymio position every estimation step is done on purpose, it avoids too frequent position rollback in Thymios perspective
+
             elif errorNorm > SOFT_KIDNAPPING_THRESHOLD:
                 print(f"Soft kidnapping, correcting position by ({errorNorm} mm)")
                 thymio.set_pose(estPose[0], estPose[1], estPose[2])
 
-        # Stop thymio
+        # Stop thymio before exiting thread
 
         thymio.node.stop()
 
@@ -174,6 +210,8 @@ def camera_thread() -> None:
     global camPose, newCamPose, robotSeen
     
     while True:
+
+        # Capture Thymios position, and write it as a global variable
 
         x_mm, y_mm, theta, robotSeen = getRobotPositionMm(showDisplay=False)
         camPose = np.array([x_mm, y_mm, theta])
@@ -206,7 +244,7 @@ def main_thread() -> None:
         frame0 = getLiveFrameBGR()
         cam_height, cam_width = frame0.shape[:2]
 
-    # Compute best path
+    # Compute best path and generate dashboard
 
     handles = setup_dashboard(
     coords=coords,
@@ -234,6 +272,7 @@ def main_thread() -> None:
     err_line        = handles["err_line"]
 
     # camera-overlay & mapping handles
+
     world_to_pix    = handles["world_to_pix"]
     odom_circle_cam = handles["odom_circle_cam"]
     cam_circle_cam  = handles["cam_circle_cam"]
@@ -252,6 +291,7 @@ def main_thread() -> None:
         return
     
     # Only start camera thread if camera is available
+
     if not NO_CAMERA_MODE:
         cameraThread = Thread(target=camera_thread, daemon=True)
         cameraThread.start()
@@ -267,7 +307,8 @@ def main_thread() -> None:
 
     closed = False
 
-    #histories for right-hand plots
+    # Buffers for right-hand plots
+
     t0 = perf_counter()
     t_hist = []
     sigx_hist = []
@@ -275,6 +316,7 @@ def main_thread() -> None:
     sigtheta_hist = []
     err_hist = []
 
+    # Run dashboard update until it's closed
 
     def on_close(event):
         nonlocal closed
@@ -290,9 +332,13 @@ def main_thread() -> None:
 
         if hardKidnapping is not None:
 
+            # Get Thymios coordinate seen from camera
+
             coords[4][3] = hardKidnapping[0]
             coords[4][4] = hardKidnapping[1]
             theta0 = hardKidnapping[2]
+
+            # Recompute update global path and create new dashboard, keep old dashboard in the background
 
             print("Recomputing global path...")
 
@@ -326,7 +372,8 @@ def main_thread() -> None:
             line_sigx, line_sigy, line_sigtheta = handles["cov_lines"]
             err_line        = handles["err_line"]
 
-            #camera-overlay & mapping handles
+            # camera-overlay & mapping handles
+
             world_to_pix    = handles["world_to_pix"]
             odom_circle_cam = handles["odom_circle_cam"]
             cam_circle_cam  = handles["cam_circle_cam"]
@@ -335,12 +382,15 @@ def main_thread() -> None:
 
             path = global_path.copy()
 
+            # Restart Thymio thread
+
             thymioThread = Thread(target=thymio_thread, args=(path, theta0), daemon=True)
             thymioThread.start()
             while thymio is None:
                 plt.pause(0.001)
 
-        # --- 1) Update live camera image on the left panel ---
+        # Update live camera image on the left panel
+
         try:
             frame_bgr = getLiveFrameBGR()
             if frame_bgr is not None:
@@ -389,12 +439,12 @@ def main_thread() -> None:
         y_head = y + ARROW_LENGTH * np.sin(theta_est)
         odom_arrow.set_positions((x, y), (x_head, y_head))
 
-        # ----------------------------------------------------------
-        #  UPDATE CAMERA-OVERLAY MARKERS ON LEFT PANEL
-        # ----------------------------------------------------------
+        # Update camera-overlay markers on left panel
+
         ARROW_PIX = 40.0
 
-        # 1) ODOM overlaid on camera image
+        # ODOM overlaid on camera image
+
         px_odom, py_odom = world_to_pix(thymio.x, thymio.y)
         odom_circle_cam.center = (px_odom, py_odom)
 
@@ -403,7 +453,8 @@ def main_thread() -> None:
         odom_arrow_cam.set_positions((px_odom, py_odom),
                                     (px_head_odom, py_head_odom))
 
-        # 2) CAMERA measurement overlaid on camera image
+        # Camera measurement overlayed on camera image
+
         if robotSeen:
             px_cam, py_cam = world_to_pix(camPose[0], camPose[1])
             cam_circle_cam.center = (px_cam, py_cam)
@@ -413,12 +464,13 @@ def main_thread() -> None:
             cam_arrow_cam.set_positions((px_cam, py_cam),
                                         (px_head_cam, py_head_cam))
 
-        # ---------- UPDATE COVARIANCE PLOT (top-right) ----------
+        # Update covariance plot
         t_rel = perf_counter() - t0
         t_hist.append(t_rel)
 
         # P is global and updated inside thymio_thread by ekf_step(...)
         # We assume P is a 3x3 numpy array.
+
         sigx_hist.append(P[0, 0])
         sigy_hist.append(P[1, 1])
         sigtheta_hist.append(P[2, 2])
@@ -429,18 +481,18 @@ def main_thread() -> None:
         ax_cov.relim()
         ax_cov.autoscale_view()
 
-        # ---------- UPDATE ERROR PLOT (odom vs camera, bottom-right) ----------
+        # Update odometry vs estimation error plot
 
         pos_odom = np.array([thymio.x, thymio.y])
         pos_cam  = np.array([estPose[0], estPose[1]])
         err_val = np.linalg.norm(pos_odom - pos_cam)   # [mm]
 
         # Clamp error value for better visualization
+
         if err_val > 2 * WAYPOINT_POS_TOLERANCE:
             err_val = 2 * WAYPOINT_POS_TOLERANCE
 
         err_hist.append(err_val)
-
         err_line.set_data(t_hist, err_hist)
         ax_err.relim()
         ax_err.autoscale_view()
@@ -453,8 +505,12 @@ def main_thread() -> None:
 
         log += f'{thymio.t}, {camPose[0]}, {camPose[1]}, {camPose[2]}, {thymio.x}, {thymio.y}, {thymio.theta}, {thymio.v}, {thymio.omega}\n'
 
+    # When window is closed, save pose log of dashboard
+
     with open('log.csv', 'w') as log_file:
         log_file.write(log)
+
+    # Then open Kalmans logs to display detailed data about EKF
 
     plt.close('all')
     plt.ioff()
@@ -464,6 +520,8 @@ def main_thread() -> None:
     plt.show(block=True)
 
 if __name__ == '__main__':
+
+    # Run main thread, exit if CTRL+C is pressed
 
     try:
         main_thread()
