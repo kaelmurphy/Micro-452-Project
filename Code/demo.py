@@ -18,17 +18,17 @@ NO_THYMIO_MODE = False
 NO_CAMERA_MODE = False
 
 # Thymio calibration settings
-GLOB_NAV_EPSILON = 90
-WAYPOINT_POS_TOLERANCE = 20
+GLOB_NAV_EPSILON = 100
+WAYPOINT_POS_TOLERANCE = 60
 NUDGE_LENGTH = 160
-SOFT_KIDNAPPING_THRESHOLD = 8
+SOFT_KIDNAPPING_THRESHOLD = 20
 HARD_KIDNAPPING_THRESHOLD = 200
 
 # Kalman settings
 
 TS = 0.2
-Q = np.diag([0.2, 0.2, 1.6e-3])
-R_cam = np.diag([0.76, 0.76, 7e-4])
+Q = np.diag([0.2, 0.2, 1.4e-3])
+R_cam = np.diag([0.9, 0.9, 7e-4])
 P = np.diag([0.01, 0.01, 0.01])
 
 # Globals

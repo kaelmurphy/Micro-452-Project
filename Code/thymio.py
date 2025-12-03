@@ -134,7 +134,7 @@ class Thymio():
                 self.x = event_data[2]
                 self.y = event_data[3]
                 self.theta = lsb_to_rad(event_data[4])
-                self.v = event_data[5] * (self.cal.scale / 100000)
+                self.v = event_data[5] * (self.cal.kD / 100000)
                 self.omega = lsb_to_rad(event_data[6])
                 self.log += f'{self.t}, {self.x}, {self.y}, {self.theta}, {self.v}, {self.omega}\n'
             case 'blocked':

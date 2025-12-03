@@ -163,11 +163,11 @@ def plot_covariance_history(Ts):
     line_x, = ax1.plot(t, var_x, label="Var(x)")
     line_y, = ax1.plot(t, var_y, label="Var(y)")
     ax1.set_xlabel("Time [s]")
-    ax1.set_ylabel("Variance of x,y")
+    ax1.set_ylabel(r"$\sigma_x^2,\,\sigma_y^2\;\;[\mathrm{mm}^2]$")
     ax1.grid(True)
     ax2 = ax1.twinx()
     line_theta, = ax2.plot(t, var_theta, label="Var(theta)", color = 'green')
-    ax2.set_ylabel("Variance of theta")
+    ax2.set_ylabel(r"$\sigma_\theta^2\;[\mathrm{rad}^2]$")
     lines = [line_x, line_y, line_theta]
     labels = [line.get_label() for line in lines]
     ax1.legend(lines, labels, loc="upper left")
