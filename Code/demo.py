@@ -212,7 +212,7 @@ def camera_thread() -> None:
 
         # Capture Thymios position, and write it as a global variable
 
-        x_mm, y_mm, theta, robotSeen = getRobotPositionMm(showDisplay=False)
+        x_mm, y_mm, theta, robotSeen = getRobotPositionMm()
         camPose = np.array([x_mm, y_mm, theta])
         newCamPose = True
 

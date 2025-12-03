@@ -1,7 +1,7 @@
 # Vision
 
 ## 1. Overview  
-The vision program is called from our demo file using a single function: `getVisionCoords(timeout=, showDisplay=)`. We use it to set up our world boundary and find the millimeter locations of our robot, goal, and obstacle vertices.
+The vision program is called from our demo file using a single function: `getVisionCoords(timeout, showDisplay)`. We use it to set up our world boundary and find the millimeter locations of our robot, goal, and obstacle vertices.
 
 - **timeout**: number of frames to wait before timing out  
 - **showDisplay**: boolean controlling whether the live camera display is shown  
@@ -55,15 +55,11 @@ After the stability check passes, the system returns four things:
 3. The homography matrix used to convert pixels into millimeters.  
 4. The pixel positions of the operating zone corners, used in the dashboard live feed.
 
----
-
 ### 1.2. Fast robot pose acquisition  
-Once the system has been initialized using `getVisionCoords(...)`, we assume the global obstacles and the corners of our operating zone will not change. Since we are expecting this behaviour, it doesn't make sense to redo this processing every time we capture a frame. Instead, we created a lightweight function `getRobotPositionMm(showDisplay=False)` that we call whenever we want an updated robot position from the camera.
+Once the system has been initialized using `getVisionCoords(...)`, we assume the global obstacles and the corners of our operating zone will not change. Since we are expecting this behaviour, it doesn't make sense to redo this processing every time we capture a frame. Instead, we created a lightweight function `getRobotPositionMm()` that we call whenever we want an updated robot position from the camera.
 
 #### 1.2.1. getRobotPositionMm()  
-This helper function reads a frame from the cached camera, finds the robot marker, and computes its world coordinates and orientation using the $H$ transform from earlier. It returns the robot’s x-position, y-position, orientation angle, and a validity flag. If the robot is not visible, the function returns None for the position and angle, and False for `robot_seen`; if the robot is not in the frame the program will continue to run using only odometry.
-
----
+This helper function reads a frame from the cached camera, finds the robot marker, and computes its world coordinates and orientation using the $H$ transform from earlier. It returns the robot’s x-position, y-position, orientation angle, and a validity flag. If the robot is not visible, the function returns None for the position and angle, and False for `robotSeen`; if the robot is not in the frame the program will continue to run using only odometry.
 
 ### 1.3. Shutdown and live frame access  
 
@@ -72,8 +68,6 @@ When the demo finishes, we can shut down the vision system using the `stopVision
 
 #### 1.3.2. getLiveFrameBGR()  
 This function allows other parts of the program to request the most recent camera frame at any time. We overlaid the theoretical path on top of the live feed so we can visually see how the robot is behaving.
-
----
 
 ## 2. Analysis
 
@@ -155,8 +149,6 @@ This does two things:
 
 After exiting the for-loop, the frames are closer to their steady state, which improves ArUco and obstacle detection later in the program.
 
----
-
 ### 2.2. ArUco marker detection
 
 #### 2.2.1. ArUco dictionaries and encoding
@@ -196,8 +188,6 @@ In our system:
 
 The `detectAruco` function implements the ArUco detection pipeline, this is all internal to OpenCV, so we didn't write the code for this. However, the method OpenCV uses is explained below:
 
----
-
 ##### 1. **Conversion to greyscale**
 
 ArUco markers only store information in black & white intensity as seen above, so OpenCV turns the three BGR channels into a single greyscale channel:
@@ -219,14 +209,10 @@ https://docs.opencv.org/4.x/de/d25/imgproc_color_conversions.html
 - ArUco markers only encode information through black & white intensity, not colour. Using greyscale makes the filtering process easier since the algorithm only separates “dark” from “light”,  rather than processing three colour channels.
 - Greyscale removes colour-specific noise and produces cleaner edges for thresholding and contour detection.
 
----
-
 ##### 2. **Detector initialization**
 
 OpenCV loads the `DICT_4X4_50` dictionary.  
 This dictionary restricts detection to exactly 50 known 4×4 bit patterns (IDs 0-49)
-
----
 
 ##### 3. **Looking for ArUco markers**
 
@@ -246,17 +232,13 @@ Where:
 - $I(u,v)$: greyscale intensity at neighbour pixel (u,v)
 - $C$: constant offset to bias the threshold
 
----
-
 ###### b. **Contour filtering**
 
 After thresholding, the image is binarized with pixels either being black (0) or white (255). OpenCV finds areas of the image containing boundaries between white and black regions, then it "walks" along these edges and returns its path (the contour). Most contours in the image are not ArUco markers, so OpenCV filters contours based on:
 
 - Area  
 - Convexity  
-- Approximate shape  
-
----
+- Approximate shape
 
 ###### c. **Warping and bit sampling**
 
@@ -351,8 +333,6 @@ Where:
 
 The homography transform paired with the bilinear interpolation returns the intensity value of the sub-pixel brightness. This will be used to determine whether this sub-pixel is a part of the ArUco code.
 
----
-
 ###### d. **Dictionary matching**
 
 The sampled 4×4 bits form a candidate pattern $M$. OpenCV compares this against each dictionary entry $D_k$ to ensure that only one ID is matched to what we have identified:
@@ -366,8 +346,6 @@ Where:
 - $M$: extracted 4×4 bit matrix
 - $D_k$: k-th dictionary pattern
 - $d_H$: Hamming distance (bit mismatches)
-
----
 
 ##### 4. **Output structure**
 
@@ -383,8 +361,6 @@ Where:
 
 - $p_k$: k-th corner point (2D pixel coordinate)
 - $c$: computed marker center
-
----
 
 ### 2.3. Operating zone and coordinates
 
@@ -404,8 +380,6 @@ The order is forced even if the IDs are returned in a different sequence because
 2. When we draw the polygon representing the zone, we want a simple counter-clockwise loop that does not self-intersect; consistent ordering guarantees that.
 3. When we return the list to `demo.py`, the global navigation program expects all polygons to be counter-clockwise.
 
----
-
 #### 2.3.2. World coordinate system
 
 The world coordinate system is in millimeters, and the size of it is set by the physical dimensions we chose to use on our background sheet of paper. The known width and height of our operating zone are set as constants:
@@ -420,8 +394,6 @@ The coordinates of the four board corners in world space are:
   - (0, heightMm) = top-left
 
 All points inside the operating zone can then be expressed in millimeters after finding the suitable homographic transform.
-
----
 
 ### 2.4. Homography and pixel to world coordinate mapping
 
@@ -444,9 +416,7 @@ Similarly to the ArUco codes:
 - The world corner coordinates are the destination points.
 - `cv2.getPerspectiveTransform` takes these and solves for $H$.
 
-To map a pixel point pt = (x, y) into millimeter world coordinates we form a $1\times 1\times 2$ array to pass into `cv2.perspectiveTransform`, OpenCV multiplies $H$ by $[x, y, 1]^T$ internally and returns the result, finally it normalizes by the third coordinate $w'$ to yield $(X, Y)$. It returns (X_mm, Y_mm) which is the position in millimeters. We also use the inverse of the $H$ transform to convert our path (in mm) back into pixel coordinates for our dashboard. 
-
----
+To map a pixel point pt = (x, y) into millimeter world coordinates we form a $1\times 1\times 2$ array to pass into `cv2.perspectiveTransform`, OpenCV multiplies $H$ by $[x, y, 1]^T$ internally and returns the result, finally it normalizes by the third coordinate $w'$ to yield $(X, Y)$. It returns (X_mm, Y_mm) which is the position in millimeters. We also use the inverse of the $H$ transform to convert our path (in mm) back into pixel coordinates for our dashboard.
 
 ### 2.5. Robot pose estimation
 
@@ -474,8 +444,6 @@ $\theta$ is defined in the world coordinates by:
   - $3\pi$/2: robot faces -Y (downwards).
 
 The ArUco marker is attached to the robot so that its center is roughly in the same position as the robot’s center of rotation and its top edge points in the robot’s forward direction. If the marker is misaligned then $\theta$ will have a constant offset with the real forward heading of the robot.
-
----
 
 ### 2.6. Obstacle detection and processing
 
@@ -524,8 +492,6 @@ G_{\text{5×5}} =
 $$
 
 We apply a $5\times 5$ Gaussian blur by taking each pixel and combining it with the surrounding twenty-four neighbours using the fixed weights supplied by OpenCV. The weight matrix approximates a Gaussian distribution. For each pixel, we multiply every neighbour by the corresponding weight and add the results. The weights are such that they sum to one, which keeps the image brightness the same.
-
----
 
 #### 2.6.3. Colour thresholding
 
@@ -636,8 +602,6 @@ The final representation of an obstacle in the coordinate array is as a set of r
 - vertex label: "1", "2", ...
 - x_mm, y_mm: world coordinates in millimeters
 
----
-
 ### 2.7. Stability filtering and robustness
 
 #### 2.7.1. Motivation for temporal filtering
@@ -682,4 +646,80 @@ We are able to toggle latency and stability by modifying our hardcoded `bufferLe
 
 We adjusted `bufferLen` throughout our testing, when obstacle detection was noisy we increased it to ensure stability. When detection was reliable we decreased it to speed up the program. 
 
----
+### 2.8. Fast robot pose acquisition
+
+Once the vision system has been initialized and the homography has been computed, the heavy processing does not need to be repeated every time we want to update the robot’s position. The function `getRobotPositionMm()` provides an easy way to fetch the robot’s pose using the cached camera and homography transformation. The function returns x_mm, y_mm, theta, robotSeen; robotSeen is a boolean flag that is used to determine whether the camera can be used for position determination.
+
+#### 2.8.1. Requirements and frame acquisition loop
+
+This function needs:
+
+- `VISION_CAMERA`: the background `CameraStream` object (Section 2.1).
+- `VISION_H`: the pixel to world homography matrix computed during initialization (Section 2.4).
+
+The function retrieves the newest frame from the camera:
+
+```python
+frame = VISION_CAMERA.read()
+if frame is None:
+    time.sleep(0.01)
+    continue
+```
+
+This matches the locking behaviour from earlier. If no frame is ready, wait; otherwise process it.
+
+#### 2.8.2. Detecting the robot marker
+
+Aruco detection is applied to the frame:
+
+```python
+_, centerMap, cornerMap, _ = detectAruco(frame)
+```
+
+If the robot marker (ID 8) isn't detected:
+
+```python
+return None, None, None, False
+```
+
+#### 2.8.3. Coordinate conversion and robot orientation
+
+The robot’s pixel center is mapped into world coordinates using the cached homography:
+
+```python
+robotWorld = pixelToWorld(centerMap[ROBOT_ID], VISION_H)
+x_mm, y_mm = robotWorld
+
+```
+
+The orientation procedure is the same as described earlier:
+
+1. Compute the midpoint of the top edge of the robot marker.
+2. Convert the midpoint into world coordinates.
+3. Make the vector from robot center to the midpoint.
+4. Compute the heading using `atan2`.
+
+```python
+topMidPx = (rCorners[0] + rCorners[1]) / 2.0
+topMidWorld = pixelToWorld(topMidPx, VISION_H)
+dx = topMidWorld[0] - x_mm
+dy = topMidWorld[1] - y_mm
+theta = math.atan2(dy, dx)
+```
+
+### 2.9. Live frame acquisition
+
+#### 2.9.1. getLiveFrameBGR() function
+
+A function to get the latest frame from the cached camera. Used alongside the inverse $H$ transform to turn the path into pixel coordinates from world coordinates.
+
+```python
+def getLiveFrameBGR():
+    """return the latest BGR frame from the cached CameraStream."""
+    global VISION_CAMERA
+    if VISION_CAMERA is None:
+        raise RuntimeError(
+            "init world error"
+        )
+    return VISION_CAMERA.read()
+```
