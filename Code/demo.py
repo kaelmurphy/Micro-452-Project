@@ -3,10 +3,10 @@ from matplotlib import pyplot as plt
 from enum import Enum
 from thymio import *
 from globalnav import *
-from Kalman2 import *
+from kalman import *
 from globalnav_plot import ARROW_LENGTH
 from time import perf_counter
-from vision2 import getVisionCoords, getRobotPositionMm, getLiveFrameBGR
+from vision import getVisionCoords, getRobotPositionMm, getLiveFrameBGR
 from threading import Thread
 from dashboard import setup_dashboard
 import pandas as pd
@@ -18,18 +18,17 @@ NO_THYMIO_MODE = False
 NO_CAMERA_MODE = False
 
 # Thymio calibration settings
-
-GLOB_NAV_EPSILON = 90
-WAYPOINT_POS_TOLERANCE = 20
+GLOB_NAV_EPSILON = 100
+WAYPOINT_POS_TOLERANCE = 60
 NUDGE_LENGTH = 160
-SOFT_KIDNAPPING_THRESHOLD = 8
+SOFT_KIDNAPPING_THRESHOLD = 20
 HARD_KIDNAPPING_THRESHOLD = 200
 
 # Kalman settings
 
-TS = 0.2
-Q = np.diag([0.2, 0.2, 1.6e-3])
-R_cam = np.diag([0.76, 0.76, 7e-4])
+TS = 0.1
+Q = np.diag([0.2, 0.2, 7e-4])
+R_cam = np.diag([0.3, 0.3, 3.5e-4])
 P = np.diag([0.01, 0.01, 0.01])
 
 # Globals

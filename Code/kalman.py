@@ -163,11 +163,11 @@ def plot_covariance_history(Ts):
     line_x, = ax1.plot(t, var_x, label="Var(x)")
     line_y, = ax1.plot(t, var_y, label="Var(y)")
     ax1.set_xlabel("Time [s]")
-    ax1.set_ylabel("Variance of x,y")
+    ax1.set_ylabel(r"$\sigma_x^2,\,\sigma_y^2\;\;[\mathrm{mm}^2]$")
     ax1.grid(True)
     ax2 = ax1.twinx()
     line_theta, = ax2.plot(t, var_theta, label="Var(theta)", color = 'green')
-    ax2.set_ylabel("Variance of theta")
+    ax2.set_ylabel(r"$\sigma_\theta^2\;[\mathrm{rad}^2]$")
     lines = [line_x, line_y, line_theta]
     labels = [line.get_label() for line in lines]
     ax1.legend(lines, labels, loc="upper left")
@@ -218,7 +218,7 @@ def plot_innovation_history(Ts):
     line_y = ax1.plot(t[mask], innov_y[mask], label="innovation y")[0]
 
     ax1.set_xlabel("Time [s]")
-    ax1.set_ylabel("Innovation (x, y)")
+    ax1.set_ylabel("Innovation (x, y) [mm]")
     ax1.grid(True)
 
     # RIGHT AXIS → theta innovations
@@ -227,7 +227,7 @@ def plot_innovation_history(Ts):
         t[mask], innov_theta[mask], color="purple", label="innovation theta"
     )[0]
 
-    ax2.set_ylabel("Innovation (theta)")
+    ax2.set_ylabel("Innovation (theta) [rad]")
 
     # ---- COMBINED LEGEND ----
     lines = [line_x, line_y, line_theta]

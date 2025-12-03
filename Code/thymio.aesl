@@ -36,7 +36,7 @@ var epsilon = 0
 var k_e_num = 8
 var k_e_den = 1
 var k_epsilon_num = 1
-var k_epsilon_den = 16
+var k_epsilon_den = 24
 
 # Control inputs
 var v = 0

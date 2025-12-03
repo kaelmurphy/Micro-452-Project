@@ -6,3 +6,4 @@ pyserial==3.5
 tdmclient==0.1.21
 pandas 
 shapely
+PyQt6
