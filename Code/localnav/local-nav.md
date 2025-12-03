@@ -45,7 +45,7 @@ $$
 
 ### Change in position
 
-To integrate the position, we could consider the same geometrical setup as before, but it would be a bit computationally heavy, and would lead to special cases (i.e. radius at infinity when moving in a straight line). The **mid-point rule** also known as **Runge–Kutta 2** (**RK2**) is used instead. The idea is that the change of coordinate has mainly followed the mid-point heading.
+To integrate the position, we could consider the same geometrical setup as before, but it would be a bit computationally heavy, and would lead to special cases (i.e. radius at infinity when moving in a straight line). The **mid-point rule** also known as **Runge-Kutta 2** (**RK2**) is used instead. The idea is that the change of coordinate has mainly followed the mid-point heading.
 $$
 \begin{align}
 \theta_{mid} &= \theta + \frac{\Delta \theta}{2} \\
