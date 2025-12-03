@@ -315,8 +315,14 @@ def setup_dashboard(
 
     ax_cov.set_title("EKF covariance (diagonal)")
     ax_cov.set_xlabel("time [s]")
+
     # Create a twin axis on the right
     ax_cov_theta = ax_cov.twinx()
+    
+    # Enable autoscaling for θ-axis
+    ax_cov_theta.set_autoscale_on(True)
+    ax_cov_theta.relim()
+    ax_cov_theta.autoscale_view()
 
     # Left-axis lines: σx², σy²
     line_sigx, = ax_cov.plot([], [], label=r"$\sigma_x^2$")
