@@ -3,10 +3,10 @@ from matplotlib import pyplot as plt
 from enum import Enum
 from thymio import *
 from globalnav import *
-from Kalman2 import *
+from kalman import *
 from globalnav_plot import ARROW_LENGTH
 from time import perf_counter
-from vision2 import getVisionCoords, getRobotPositionMm, getLiveFrameBGR
+from vision import getVisionCoords, getRobotPositionMm, getLiveFrameBGR
 from threading import Thread
 from dashboard import setup_dashboard
 import pandas as pd
