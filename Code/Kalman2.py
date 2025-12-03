@@ -218,7 +218,7 @@ def plot_innovation_history(Ts):
     line_y = ax1.plot(t[mask], innov_y[mask], label="innovation y")[0]
 
     ax1.set_xlabel("Time [s]")
-    ax1.set_ylabel("Innovation (x, y)")
+    ax1.set_ylabel("Innovation (x, y) [mm]")
     ax1.grid(True)
 
     # RIGHT AXIS → theta innovations
@@ -227,7 +227,7 @@ def plot_innovation_history(Ts):
         t[mask], innov_theta[mask], color="purple", label="innovation theta"
     )[0]
 
-    ax2.set_ylabel("Innovation (theta)")
+    ax2.set_ylabel("Innovation (theta) [rad]")
 
     # ---- COMBINED LEGEND ----
     lines = [line_x, line_y, line_theta]
