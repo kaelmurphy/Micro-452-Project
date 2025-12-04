@@ -18,6 +18,7 @@ NO_THYMIO_MODE = False
 NO_CAMERA_MODE = False
 
 # Thymio calibration settings
+
 GLOB_NAV_EPSILON = 100
 WAYPOINT_POS_TOLERANCE = 60
 NUDGE_LENGTH = 160
