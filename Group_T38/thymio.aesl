@@ -1,0 +1,192 @@
+# Timestamp
+var s = 0
+var ms = 0
+
+# Odometry
+var d_l_um = 0
+var d_r_um = 0
+var d_s_um = 0
+var d_theta = 0
+var theta_mid = 0
+var cos_mid = 0
+var sin_mid = 0
+var d_x_um = 0
+var d_y_um = 0
+
+# Pose
+var x_mm = {X0}
+var x_um = 0
+var y_mm = {Y0}
+var y_um = 0
+var theta = {THETA0}
+
+# Reference
+var r_x_mm = {X1}
+var r_y_mm = {Y1}
+
+# Cartesian error
+var e_x_mm = 0
+var e_y_mm = 0
+
+# Polar error
+var e_mm = 0
+var epsilon = 0
+
+# Controller
+var k_e_num = 8
+var k_e_den = 1
+var k_epsilon_num = 1
+var k_epsilon_den = 24
+
+# Control inputs
+var v = 0
+var omega = 0
+var left = 0
+var right = 0
+
+# Avoidance
+var i = 0
+var j = 0
+var prox_sum = 0
+var state = 0
+var avoid_dir = 0
+
+onevent motor
+
+	# ===================================== #
+	#				Odometry				#
+	# ===================================== #
+
+	# Compute wheel increment
+	if abs motor.left.speed >= 10 then
+	call math.muldiv(d_l_um, motor.left.speed, {K_D}, 10000)
+	else
+		d_l_um = 0
+	end
+	
+	if abs motor.right.speed >= 10 then
+	call math.muldiv(d_r_um, motor.right.speed, {K_D}, 10000)
+	else
+		d_r_um = 0
+	end
+
+	# Compute linear and angular increments
+	d_s_um = (d_l_um + d_r_um) >> 1
+	call math.muldiv(d_theta, d_r_um - d_l_um, {K_THETA}, 10000)
+
+	# Integrate heading
+	theta_mid = theta + (d_theta >> 1)
+	theta += d_theta
+
+	# Compute cartesian increment
+	call math.cos(cos_mid, theta_mid)
+	call math.sin(sin_mid, theta_mid)
+	call math.muldiv(d_x_um, d_s_um, cos_mid, 32767)
+	call math.muldiv(d_y_um, d_s_um, sin_mid, 32767)
+
+	# Integrate position
+	x_um += d_x_um
+	x_mm += x_um / 1000
+	x_um %= 1000
+	y_um += d_y_um
+	y_mm += y_um / 1000
+	y_um %= 1000
+
+	# ===================================== #
+	#				Controller         		#
+	# ===================================== #
+
+	# Compute carthesian error
+	e_x_mm = r_x_mm - x_mm
+	e_y_mm = r_y_mm - y_mm
+
+	# Compute polar error, clamp to avoid L2 norm overflow
+	call math.clamp(e_x_mm, e_x_mm, -127, 127)
+	call math.clamp(e_y_mm, e_y_mm, -127, 127)
+	call math.sqrt(e_mm, (e_x_mm * e_x_mm) + (e_y_mm * e_y_mm))
+	call math.atan2(epsilon, e_y_mm, e_x_mm)
+	epsilon -= theta
+	
+	# Compute control outputs
+	call math.muldiv(v, e_mm, k_e_num, k_e_den)
+	call math.muldiv(v, v, 32767 - abs epsilon, 32767)
+	call math.muldiv(omega, epsilon, k_epsilon_num, k_epsilon_den)
+
+	# Clamp linear speed
+	call math.clamp(v, v, -200, 200)
+	left = v - omega
+	right = v + omega
+
+	# ===================================== #
+	#		Avoidance state machine			#
+	# ===================================== #
+
+	# Move toward reference
+	if state == 0 then
+		if e_mm > 10 and prox_sum < 4000 then
+			motor.left.target = left
+			motor.right.target = right
+		else
+			motor.left.target = 0
+			motor.right.target = 0
+		end
+	
+	# Turn toward obstacle
+	elseif state == 1 then
+		if prox_sum < 4000 then
+			motor.left.target = -avoid_dir
+			motor.right.target = avoid_dir
+		else
+			motor.left.target = 0
+			motor.right.target = 0
+			state = 2
+		end
+
+	# Turn away from obstacle
+	elseif state == 2 then
+		if prox_sum > 0 then
+			motor.left.target = avoid_dir
+			motor.right.target = -avoid_dir
+			j = 0
+		elseif j < 150 then
+			motor.left.target = avoid_dir
+			motor.right.target = -avoid_dir
+			j++
+		else
+			motor.left.target = 0
+			motor.right.target = 0
+		end
+	end
+
+	# ===================================== #
+	#			Communications				#
+	# ===================================== #
+
+	# Emit pose
+	emit pos [s, ms, x_mm, y_mm, theta, v, omega]
+
+	# Count elapsed time
+	ms += 10
+	s += ms / 1000
+	ms %= 1000
+
+onevent prox
+
+	# Sum proximity sensors
+	prox_sum = 0
+	for i in 0:4 do
+		prox_sum += prox.horizontal[i]
+	end
+
+	# When moving toward reference, notify if robot is blocked
+	if state == 0 then
+		if prox_sum >= 4000 then
+			emit blocked
+		end
+
+	# When turning away from obstacle, notify if front of robot is clear
+	elseif state == 2 then
+		if prox_sum == 0 then
+			emit clear
+		end
+	end
