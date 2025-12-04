@@ -11,8 +11,8 @@ GOAL_ID = 9
 
 # GLOBAL VISION STATE
 # ===========================================================
-VISION_CAMERA = None  # cached CameraStream
-VISION_H = None       # cached pixel->world homography
+VISION_CAMERA = None
+VISION_H = None
 
 
 # CAMERA STREAM
@@ -28,7 +28,6 @@ class CameraStream:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.cap.set(cv2.CAP_PROP_FPS, fps)
 
-        # Camera warm-up to avoid super-saturated startup frames
         # Discard the first N frames while auto-exposure/auto-gain settles.
         warmup_frames = 30
         for _ in range(warmup_frames):
@@ -124,7 +123,7 @@ def drawZone(frame, zone, color=(0, 255, 255)):
 
 
 def drawRobot(canvas, center, corners=None):
-    """Draw robot marker with orientation arrow (pixel space only)."""
+    """draw robot marker with orientation"""
     robotCenter = (int(center[0]), int(center[1]))
     cv2.circle(canvas, robotCenter, 6, (255, 0, 0), -1)
 
@@ -152,19 +151,12 @@ def drawObstacles(canvas, obstacles):
     return canvas
 
 
-# HOMOGRAPHY HELPERS (A0 SHEET)
+# HOMOGRAPHY
 # ============================================================
 
 def computeHomography(zone):
     """
-    Compute pixel->world homography H using the zone corners.
-    Markers 3,2,1,0 are at A0 corners in landscape orientation.
-
-    World (mm):
-        (0,   0)   : ID 3  bottom-left
-        (1189,0)   : ID 2  bottom-right
-        (1189,841) : ID 1  top-right
-        (0,  841)  : ID 0  top-left
+    return homography matrix H to convert from pixel to world mm
     """
     if (not zone.get("isComplete")
             or "corners" not in zone
@@ -191,7 +183,7 @@ def computeHomography(zone):
 
 
 def pixelToWorld(pt, H):
-    """Map a single pixel point (x,y) to world mm using homography H."""
+    """map a pixel point (x,y) to world mm using H."""
     if H is None or pt is None:
         return None
     x, y = float(pt[0]), float(pt[1])
@@ -211,12 +203,7 @@ class Obstacle:
 
     @property
     def verts(self):
-        """
-        More stable polygon extraction:
-        - epsilon for approxPolyDP
-        - snap to small pixel grid
-        - merge very close vertices
-        """
+        """define and return obstacle vertices in pixel coordinates."""
         if self._verts is None:
             peri = cv2.arcLength(self.contour, True)
             epsilon = 0.02 * peri
@@ -255,7 +242,7 @@ class Obstacle:
         return self._verts
 
     def getWorldVerts(self, H=None):
-        """Return obstacle vertices in world (A0 mm) coordinates using homography H."""
+        """return obstacle vertices in world coordinates using homography H."""
         if H is None:
             return []
         worldVerts = [pixelToWorld(v, H) for v in self.verts]
@@ -284,9 +271,7 @@ class Obstacle:
 
 
 def detectObstacles(frame, zone, minArea=400, maxArea=50000):
-    """
-    Detect colored obstacles with optimized processing pipeline.
-    """
+    """detect colored obstacles with optimized processing pipeline."""
     if not zone.get("isComplete"):
         return []
 
@@ -325,18 +310,14 @@ def detectObstacles(frame, zone, minArea=400, maxArea=50000):
 
 def getVisionCoords(timeout=None, showDisplay=True):
     """
-    Get coordinate data from the vision system.
-
-    Returns:
-        (coords, robotThetaWorld)
-        coords: numpy array [type, id, label, x, y] in A0 mm
-        robotThetaWorld: float angle in radians in A0 world frame, or None
+    returns:
+        coords: numpy array [type, id, label, x, y] in mm
+        robotThetaWorld: float angle in radians in world frame, or None
         H transformation homography matrix
+        list of board corner pixel coordinates
 
-    Orientation convention:
-        - 0 rad = along +X of homographic/world axis (to the right)
-        - angle increases counter-clockwise
-        - theta is wrapped into [0, 2π)
+    orientation:
+        - 0 rad = right (world x+)
     """
     global VISION_CAMERA, VISION_H
 
@@ -517,7 +498,7 @@ def getVisionCoords(timeout=None, showDisplay=True):
 
 
 def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=None):
-    """Extract all coordinates from a stable frame in world mm coordinates."""
+    """extract all coordinates from a stable frame in world mm coordinates."""
     coordList = []
 
     if H is None:
@@ -590,36 +571,20 @@ def _extractFrameCoords(frame, centerMap, cornerMap, zone, obstacles=None, H=Non
         return np.array(coordList, dtype=object) if coordList else np.array([]).reshape(0, 5)
 
     except Exception:
-        print("No coordinates extracted from frame due to error.")
+        print("no coordinates extracted from frame, error.")
         return np.array([]).reshape(0, 5)
 
 
 # FAST ROBOT POSE QUERY
 # ============================================================
 
-def getRobotPositionMm(showDisplay=False):
-    """
-    Lightweight function to get the robot's current pose in world mm.
-
-    This will BLOCK until the robot is detected; if the robot is
-    not visible, it keeps trying forever.
-
-    Returns:
-        (x_mm, y_mm, theta_world_rad)
-
-        - x_mm, y_mm in homographic world mm
-        - theta_world_rad in [0, 2π), with:
-            0    = facing +X (to the right along bottom horizontal)
-            π/2  = facing +Y (up)
-            π    = facing -X (left)
-            3π/2 = facing -Y (down)
-    """
+def getRobotPositionMm():
+    """returns (x_mm, y_mm, theta_world_rad, robotSeen)"""
     global VISION_CAMERA, VISION_H
 
     if VISION_CAMERA is None or VISION_H is None:
         raise RuntimeError(
-            "Vision not initialized. Call getVisionCoords(...) once first "
-            "to lock in the zone and homography."
+            "init world error"
         )
 
     while True:
@@ -653,19 +618,10 @@ def getRobotPositionMm(showDisplay=False):
                 dy = topMidWorld[1] - y_mm
                 theta = math.atan2(dy, dx)
 
-        if showDisplay:
-            dispFrame = frame.copy()
-            drawRobot(dispFrame, centerMap[ROBOT_ID], cornerMap.get(ROBOT_ID))
-            cv2.imshow("Robot Tracking", dispFrame)
-            cv2.waitKey(1)
-
         return x_mm, y_mm, theta, True
 
-
 def stopVision():
-    """
-    Cleanly stop the cached camera and close any OpenCV windows.
-    """
+    """stop the cached camera and close any OpenCV windows."""
     global VISION_CAMERA
     if VISION_CAMERA is not None:
         VISION_CAMERA.stop()
@@ -674,15 +630,11 @@ def stopVision():
 
 
 def getLiveFrameBGR():
-    """
-    Return the latest BGR frame from the cached CameraStream started by
-    getVisionCoords(). Raises if vision hasn't been initialized.
-    """
+    """return the latest BGR frame from the cached CameraStream."""
     global VISION_CAMERA
     if VISION_CAMERA is None:
         raise RuntimeError(
-            "Vision not initialized. Call getVisionCoords(...) once first "
-            "to lock in the zone and homography."
+            "init world error"
         )
     return VISION_CAMERA.read()
 
@@ -693,18 +645,16 @@ def getLiveFrameBGR():
 if __name__ == "__main__":
     print("=" * 40)
 
-    # Heavy init once: compute homography, obstacles, etc.
     coords, theta = getVisionCoords(timeout=None, showDisplay=True)
 
     if coords.size == 0:
-        print("No coordinates found or timeout occurred")
+        print("no coordinates found or timeout occurred")
     else:
         print("Returned coordinates array:")
         print(coords)
         print("Robot theta (world frame, rad):", theta)
 
-        # Example of fast position refresh (blocks until robot detected):
-        x, y, th = getRobotPositionMm(showDisplay=False)
-        print("Fast robot position (mm):", x, y, "theta:", th)
+        x, y, th = getRobotPositionMm()
+        print("robot position (mm):", x, y, "theta:", th)
 
     stopVision()

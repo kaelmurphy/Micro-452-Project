@@ -224,7 +224,7 @@ def build_nodes_from_polygons(
 # 5. Visibility graph construction
 def segment_visible(p, q, world_poly, obstacle_polys):
     """
-    Check if segment p–q is valid:
+    Check if segment p-q is valid:
       - stays within world_poly
       - does not cross obstacle interiors
       - touching at vertices/edges is allowed

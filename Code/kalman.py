@@ -84,7 +84,7 @@ def ekf_update_camera(x_pred, P_pred, z_cam, R_cam):
 
     # Updated covariance matrix (Joseph form for better numerical stability)
     I = np.eye(3)                                       
-    P_upd = (I - K @ H) @ P_pred @ (I - K @ H).T + K @ R_cam @ K.T  # Joseph form covariance update
+    P_upd = (I - K @ H) @ P_pred @ (I - K @ H).T + K @ R_cam @ K.T  
 
     return x_upd, P_upd, y                            
 
@@ -116,7 +116,7 @@ def ekf_step(x_prev, P_prev,
                       [z_cam[1]],                     
                       [wrap_angle(z_cam[2])]])        
 
-        # Perform EKF camera update
+        # EKF camera update
         x_new, P_new, innovation = ekf_update_camera(x_pred, P_pred, z, R_cam)  
 
         used_this_step = True                          
