@@ -105,12 +105,12 @@ class Thymio():
         # Compile program
         error = aw(self.node.compile(self.program))
         if error is not None:
-            raise RuntimeError(f'Compilation error: {self.program} at line {error['error_line']}:{error['error_col']} {error['error_msg']}')
+            raise RuntimeError(f'Compilation error: {self.program} at line {error["error_line"]}:{error["error_col"]} {error["error_msg"]}')
 
         # Start program
         error = aw(self.node.run())
         if error is not None:
-            raise RuntimeError(f'Error {error['error_code']}')
+            raise RuntimeError(f'Error {error["error_code"]}')
     
         # Pump old events that may be remaining from last session
         while self.t > 1.0:
